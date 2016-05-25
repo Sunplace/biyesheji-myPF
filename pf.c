@@ -4,6 +4,8 @@
 
 #include"pf.h"
 
+out_rules_link head = NULL;         //out rule link head
+
 
 int main(int argc,  char *argv[]){
 
@@ -11,7 +13,7 @@ int main(int argc,  char *argv[]){
     bool isshowhelp = false;
     bool isdaemon = false;
 
-    char sec_parse[MAX_LINE] = {0};       //require the second parse
+    char sec_parse[MAX_LINE_LEN] = {0};       //require the second parse
     
     struct parameter_tags param [] = {
         { "--version",  (char *)&isshowversion,  "--verion\t\tshow the verion of pf",   9,    sizeof(isshowversion),  _NULL_},
@@ -46,6 +48,7 @@ int main(int argc,  char *argv[]){
         else{   */
             rules_file_load();   //load the rules file
             init_iptables();      //initiate iptables
+            signal(SIGINT, sig_init_exit);          //init exit clean
             init_nfqueue();        //initiate nfqueue
             set_rpc_server();       //open a tcp server ,receive the rpc command
 
@@ -128,7 +131,7 @@ void init_iptables(void){
     return;
     int ret_out = system("iptables -I OUTPUT -m conntrack --ctstate NEW -j NFQUEUE --queue-num 11220");
     int ret_in = system("iptables -I INPUT -m conntrack --ctstate NEW -j NFQUEUE --queue-num 11221");
-    if(ret == -1)
+    if(ret_out == -1 || ret_in == -1)
         err_sys("init_iptables");
     return;
 }
@@ -138,6 +141,94 @@ void rules_file_load(void){
     /*
      * to do
      */
+    //load the out rule file
+    FILE * fp;
+    if((fp = fopen("./out_rules_file","r")) == NULL)
+        err_sys("fopen error");
+    char line[MAX_LINE_LEN];
+    u_int32_t raddr;
+    u_int16_t lport_n;
+    u_int16_t rport_n;
+    int protocol;
+    enum TARGET targ;
+    
+    while((fgets(line, MAX_LINE_LEN, fp)) != NULL){
+        if(line[0] == '#')      //skip comment
+            continue;
+        err_msg("%s",line);
+        parse_rules(line, &lport_n, &raddr, &rport_n, &protocol, &targ);
+        out_rule_insert(lport_n, raddr, rport_n, protocol, targ);
+    }
+    fclose(fp);
+    return;
+}
+
+
+void out_rule_insert(u_int16_t lport, u_int32_t raddr, u_int16_t rport, int proto, enum TARGET targ){
+    out_rules_link p;
+    if((p = malloc(sizeof(out_nd))) == NULL)
+        err_sys("malloc error");
+    p->lport = lport;
+    p->raddr = raddr;
+    p->rport = rport;
+    p->proto = proto;
+    p->target = targ;
+    if(!head){
+        head = p;
+        p->next = NULL;
+    }
+    else{
+        out_rules_link q = head;
+        head = p;
+        head->next = q;
+    }
+    return;
+}
+
+
+
+
+void parse_rules(char line[], u_int16_t * lport_n_p, u_int32_t * raddr_p, u_int16_t * rport_n_p, int * proto_p, enum TARGET * targ_p){
+        char lport[10];         //local port
+        char raddr[20];         //remote address
+        char rport[10];         //remote port
+        char proto[5];          //protocol
+        char target[10];        //target
+        if((sscanf(line, "%s%s%s%s%s", lport, raddr, rport, proto, target)) != 5)
+            err_quit("out rules file have wrong rule:%s", line);
+        if(strncmp(raddr, "-", 1) == 0)
+            *raddr_p = 0;              //all port
+        else
+            if(inet_pton(AF_INET, raddr, raddr_p) <= 0)
+                err_quit("inet_pton error for %s",raddr);
+        err_msg("remote addrr:%s:%x",raddr,*raddr_p);
+        if(strncmp(lport, "-", 1) == 0)
+            *lport_n_p = 0;
+        else
+            *lport_n_p = htons(atoi(lport));
+        if(strncmp(rport, "-", 1) == 0)
+            *rport_n_p = 0;
+        else
+            *rport_n_p = htons(atoi(rport));
+        err_msg("local port:%s:%x",lport,*lport_n_p);
+        err_msg("remote port:%s:%x",rport,*rport_n_p);
+
+        if(strncmp(proto, "TCP", 3) == 0)
+            *proto_p = IPPROTO_TCP;
+        else if((strncmp(proto, "UDP", 3) == 0))
+            *proto_p = IPPROTO_UDP;
+        else
+            err_quit("unknow for %s", proto);
+        err_msg("portocol:%s",proto);
+
+        if(strncmp(target, "DROP", 4) == 0)
+            *targ_p = DROP;
+        else if(strncmp(target, "ACCEPT", 6) == 0)
+            *targ_p = ACCEPT;
+        else
+            err_quit("unknow for %s", target);
+        err_msg("target:%s",target);
+
     return;
 }
 
@@ -157,10 +248,10 @@ void init_nfqueue(void){
     if(nfq_bind_pf(h, AF_INET) < 0)
         err_sys("nfq_bind()");
     struct nfq_q_handle * qh;
-    qh = nfq_create_queue(h, 11221, &cb, NULL);
+    qh = nfq_create_queue(h, 11220, &cb, NULL);
     if(! qh)
         err_sys("nfq_create_queue()");
-    if(nfq_set_mode(qh, NFQNL_COPY_PACKET, 0xffff) < 0)
+    if(nfq_set_mode(qh, NFQNL_COPY_PACKET, 40) < 0)
         err_sys("nfq_set_mode()");
     int fd = nfq_fd(h);
     char buf[1024];
@@ -179,22 +270,77 @@ static int cb (struct nfq_q_handle * qh, struct nfgenmsg * nfmsg , struct nfq_da
     (void)data;
 
     struct nfqnl_msg_packet_hdr * ph;
-    unsigned char * pdata = NULL;
-    int pdata_len;
+    struct iphdr * ip ;
+    int ipdata_len;
     u_int32_t id = 0;
 
     ph = nfq_get_msg_packet_hdr(nfa);
     if(ph){
         id = ntohl(ph->packet_id);
     }
-    pdata_len = nfq_get_payload(nfa, &pdata);
-    if(pdata_len == -1){
-        pdata_len = 0;
+    ipdata_len = nfq_get_payload(nfa, (unsigned char **)&ip);
+    if(ipdata_len == -1){
+        ipdata_len = 0;
     }
+    //char raddr[INET_ADDRSTRLEN];
+    //inet_ntop(AF_INET, &(ip->daddr), raddr, INET_ADDRSTRLEN);
+    u_int32_t raddr = ip->daddr;
+    u_int16_t lport,rport;
+    int proto = ip->protocol;
+    if(proto == IPPROTO_TCP){
+        struct tcphdr * tcp = ( struct tcphdr * )((char *)ip + (4 * ip->ihl));
+        lport = tcp->source;
+        rport = tcp->dest;
+    }
+    else if(proto == IPPROTO_UDP){
+        struct udphdr * udp = (struct udphdr * )((char *)ip + (4 * ip->ihl));
+        lport = udp->source;
+        rport = udp->dest;
+    }
+    else{
+        return nfq_set_verdict(qh, id, NF_ACCEPT, (u_int32_t)ipdata_len, (unsigned char *)ip);
+    }
+    execute_verdict(lport, raddr, rport, proto);
 
-    struct iphdr * iphdrp = (struct iphdr *)pdata;
 
-    printf("len %d iphdr %d %u.%u.%u.%u -> ",pdata_len,(iphdrp->ihl)<<2,IPQUAD(iphdrp->saddr));
-    printf("%u.%u.%u.%u %s",IPQUAD(iphdrp->daddr),getprotobynumber(iphdrp->protocol)->p_name);
-    return nfq_set_verdict(qh, id, NF_ACCEPT, (u_int32_t)pdata_len, pdata);
+    //printf("len %d iphdr %d %u.%u.%u.%u -> ",pdata_len,(iphdrp->ihl)<<2,IPQUAD(iphdrp->saddr));
+    //printf("%u.%u.%u.%u %s",IPQUAD(iphdrp->daddr),getprotobynumber(iphdrp->protocol)->p_name);
+    //return nfq_set_verdict(qh, id, NF_ACCEPT, (u_int32_t)pdata_len, pdata);
+}
+
+void execute_verdict(u_int16_t lport, u_int32_t raddr, u_int16_t rport, int proto){
+    /*
+     * to do
+     */
+    out_rules_link p = head;
+    while(p){
+        if(p->lport == lport && p->raddr == raddr && p->rport == rport && p->proto == proto){
+            //find a rule;
+    return;
+
+}
+
+void set_rpc_server(void){
+    /*
+     * to do
+     */
+    return;
+}
+
+static void sig_init_exit(int signo){
+    clean_rules_link(head);
+    /*
+     * do something else
+     */
+
+    return;
+}
+
+static void clean_rules_link(out_rules_link head){
+    out_rules_link p;
+    while(head){
+        p = head;
+        head = head->next;
+        free(p);
+    }
 }
