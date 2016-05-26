@@ -72,11 +72,19 @@ void out_rule_insert(u_int16_t lport, u_int32_t raddr, u_int16_t rport, int prot
 
 void parse_rules(char line[], u_int16_t * lport_n_p, u_int32_t * raddr_p, u_int16_t * rport_n_p, int * proto_p, enum TARGET * targ_p);
 
-void execute_verdict(u_int16_t lport, u_int32_t raddr, u_int16_t rport, int proto);
+enum TARGET execute_verdict(u_int16_t lport, u_int32_t raddr, u_int16_t rport, int proto);
 
 static void sig_init_exit(int signo);
 
-static void clean_rules_link(out_rules_link head);
+static void clean_rules_link(void);
+
+void out_rules_list(int fd);
+
+void do_it (int connfd);
+
+void send_cmd_to_serv(char *);
+
+int rule_del(int );
 
 #ifdef __LITTLE_ENDIAN
 #define IPQUAD(addr) \

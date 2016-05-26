@@ -19,7 +19,7 @@ int parse_command_line(int argc,char * argv[],struct parameter_tags p[]){
                     case STRING :
                         {
                             *((char *)(q->parameter)) = 0;
-                            for(i++ ;i < argc;i++){
+                            for( ;i < argc;i++){
                                strncat((char *)(q->parameter),argv[i],20);
                                strncat((char *)(q->parameter)," ",2);
                             }

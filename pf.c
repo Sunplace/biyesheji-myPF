@@ -12,6 +12,7 @@ int main(int argc,  char *argv[]){
     bool isshowversion = false;
     bool isshowhelp = false;
     bool isdaemon = false;
+    bool islist = false;
 
     char sec_parse[MAX_LINE_LEN] = {0};       //require the second parse
     
@@ -21,6 +22,7 @@ int main(int argc,  char *argv[]){
         { "-a",         (char *)sec_parse,      "-a\t\t\tadd rule to the pf",             2,     sizeof(sec_parse),      STRING},
         { "-d",         (char *)sec_parse,      "-d\t\t\tdelet rule from the pf",         2,     sizeof(sec_parse),      STRING},
         { "-D",         (char *)&isdaemon,      "-D\t\t\trun the pf",                     2,      sizeof(isdaemon),       _NULL_},
+        { "--list",     (char *)&islist,        "--list\t\t\tlist the exsit rules",         6,  sizeof(islist),         _NULL_},
         {0}
     };
 
@@ -47,9 +49,12 @@ int main(int argc,  char *argv[]){
         }
         else{   */
             rules_file_load();   //load the rules file
+            err_msg("\n");
             init_iptables();      //initiate iptables
             signal(SIGINT, sig_init_exit);          //init exit clean
-            init_nfqueue();        //initiate nfqueue
+            out_rules_list(STDOUT_FILENO);
+            err_msg("\n");
+            //init_nfqueue();        //initiate nfqueue
             set_rpc_server();       //open a tcp server ,receive the rpc command
 
             //to do
@@ -62,12 +67,45 @@ int main(int argc,  char *argv[]){
         /*
          * to do
          */
+        if(islist)
+            strncpy(sec_parse, "--list", 7);
+        err_msg("%s", sec_parse);
+        send_cmd_to_serv(sec_parse);
+        err_msg("send end");
     }
 
     //to do
     //handle rule
     return 1;
 }
+
+void send_cmd_to_serv(char * cmd){
+    int sockfd;
+    struct sockaddr_in servaddr;
+    char buff[MAX_LINE_LEN];
+    int n;
+
+    if((sockfd = socket(AF_INET, SOCK_STREAM, 0)) < 0)
+        err_sys("socket error");
+
+    bzero(&servaddr, sizeof(servaddr));
+    servaddr.sin_family = AF_INET;
+    servaddr.sin_port = htons(9999);
+    inet_pton(AF_INET, "127.0.0.1", &servaddr.sin_addr);
+
+    if(connect(sockfd, (struct sockaddr *)&servaddr, sizeof(servaddr)) < 0)
+        err_sys("connect error");
+    if(send(sockfd, cmd, strlen(cmd), 0) < 0)
+        err_sys("send error");
+    while((n = recv(sockfd, buff, MAX_LINE_LEN, 0)) > 0){
+        buff[n] = '\0';
+        fputs(buff, stdout);
+    }
+    if(n == -1)
+        err_sys("recv error");
+}
+
+
 
     
 /*
@@ -300,7 +338,25 @@ static int cb (struct nfq_q_handle * qh, struct nfgenmsg * nfmsg , struct nfq_da
     else{
         return nfq_set_verdict(qh, id, NF_ACCEPT, (u_int32_t)ipdata_len, (unsigned char *)ip);
     }
-    execute_verdict(lport, raddr, rport, proto);
+    if(execute_verdict(lport, raddr, rport, proto) == ACCEPT){
+        err_msg("packet accepted!");
+        printf("len %d iphdr %d %u.%u.%u.%u:%u -> ",ipdata_len,(ip->ihl)<<2,IPQUAD(ip->saddr),ntohs(lport));
+        printf("%u.%u.%u.%u:%u  proto:%s",IPQUAD(raddr),ntohs(rport),getprotobynumber(ip->protocol)->p_name);
+        err_msg("\n");
+
+        return nfq_set_verdict(qh, id, NF_ACCEPT, 0, NULL);
+    }
+    else{
+        err_msg("packet droped!");
+        printf("len %d iphdr %d %u.%u.%u.%u:%u -> ",ipdata_len,(ip->ihl)<<2,IPQUAD(ip->saddr),ntohs(lport));
+        printf("%u.%u.%u.%u:%u  proto:%s",IPQUAD(raddr),ntohs(rport),getprotobynumber(ip->protocol)->p_name);
+        err_msg("\n");
+
+        return nfq_set_verdict(qh, id, NF_DROP, 0, NULL);
+    }
+
+
+
 
 
     //printf("len %d iphdr %d %u.%u.%u.%u -> ",pdata_len,(iphdrp->ihl)<<2,IPQUAD(iphdrp->saddr));
@@ -308,15 +364,22 @@ static int cb (struct nfq_q_handle * qh, struct nfgenmsg * nfmsg , struct nfq_da
     //return nfq_set_verdict(qh, id, NF_ACCEPT, (u_int32_t)pdata_len, pdata);
 }
 
-void execute_verdict(u_int16_t lport, u_int32_t raddr, u_int16_t rport, int proto){
+enum TARGET execute_verdict(u_int16_t lport, u_int32_t raddr, u_int16_t rport, int proto){
     /*
      * to do
      */
     out_rules_link p = head;
     while(p){
-        if(p->lport == lport && p->raddr == raddr && p->rport == rport && p->proto == proto){
+        if(    ( !(p->lport) || (lport == p->lport) )     &&    ( !(p->raddr) || (raddr == p->raddr)  )   && \
+                    ( !(p->rport) || (rport == p->rport) )    &&   ( proto == p->proto)    )
             //find a rule;
-    return;
+            return p->target;
+        //if(p->lport == lport && p->raddr == raddr && p->rport == rport && p->proto == proto){
+        p = p->next;
+    }
+
+
+    return ACCEPT;          //default target;
 
 }
 
@@ -324,23 +387,166 @@ void set_rpc_server(void){
     /*
      * to do
      */
+    int listenfd, connfd;
+    socklen_t len;
+    struct sockaddr_in servaddr, cliaddr;
+    char buff[MAX_LINE_LEN];
+
+    if((listenfd = socket(AF_INET, SOCK_STREAM, 0)) < 0)
+        err_sys("socket error");
+    bzero(&servaddr, sizeof(servaddr));
+    servaddr.sin_family = AF_INET;
+    servaddr.sin_port = htons(9999);
+    inet_pton(AF_INET, "127.0.0.1", &servaddr.sin_addr);
+
+    if(bind(listenfd, (struct sockaddr *)&servaddr, sizeof(servaddr)) < 0)
+        err_sys("bind error");
+
+    if(listen(listenfd, 5) < 0)
+        err_sys("listen error");
+
+    for( ; ; ){
+        len = sizeof(cliaddr);
+        if((connfd = accept(listenfd, (struct sockaddr *)&cliaddr, &len)) < 0){
+            if(errno == EINTR)
+                continue;           //re accept
+            else
+                err_sys("accept error");
+        }
+        do_it(connfd);              //parse command, return result;
+        close(connfd);
+    }
+    
     return;
 }
 
+void do_it (int connfd){
+    /*
+     * fix me
+     */
+    int n;
+    char buff[MAX_LINE_LEN];
+    u_int32_t raddr;
+    u_int16_t rport;
+    u_int16_t lport;
+    enum TARGET targ;
+    int proto;
+    if((n = recv(connfd, buff, MAX_LINE_LEN, 0)) < 0)           //receive command
+        err_sys("recv error");
+    buff[n] = '\0';
+    err_msg("%s",buff);
+    if(strncmp(buff, "-a", 2) == 0){                    //add rule
+        parse_rules(buff+2, &lport, &raddr, &rport, &proto, &targ);
+        out_rule_insert(lport, raddr, rport, proto, targ);
+        err_msg("rule add:%s", buff+2);
+        if(send(connfd, "rule added", 10, 0) < 0)
+            err_sys("send error");
+    }
+    else if(strncmp(buff, "-d", 2) == 0){               //delete rule
+        int num;
+        if(sscanf(buff+2, "%d", &num) != 1)
+            err_quit("rule delete,unknow:%s", buff+2);
+        err_msg("rule del:%d", num);
+        if(rule_del(num) < 0){
+            if(send(connfd, "rule delete failed", 18, 0) < 0)
+                err_sys("send error");
+        }
+        else
+            if(send(connfd, "rule deleted", 12, 0) < 0)
+                err_sys("send error");
+
+    }
+    else if(strncmp(buff, "--list", 6) == 0){               //rule list
+        err_msg("rules list");
+        out_rules_list(connfd);
+        err_msg("rules list");
+    }
+    else
+        if(send(connfd, "unknow command", 14, 0) < 0)       //unknow
+            err_sys("send error");
+
+    err_msg("\n");
+    
+
+
+}
+
+int rule_del(int num){
+    /*
+     * to do
+     */
+    //
+    if(num <= 0)
+        return -1;
+    out_rules_link p, pre = NULL;
+    p = head;
+    int i = num;
+    while(--i){
+        if(p){
+            pre = p;
+            p = p->next;
+        }
+        else
+            break;
+    }
+    if(!p)
+        return -1;
+    else{
+        if(!pre)
+            head = p->next;
+        else
+            pre->next = p->next;
+        free(p);
+        return num;
+    }
+}
+
+
+
+
 static void sig_init_exit(int signo){
-    clean_rules_link(head);
+    out_rules_list(STDOUT_FILENO);
+    clean_rules_link();
+    err_msg("head is %s null", head ? "not" : " ");
+    out_rules_list(STDOUT_FILENO);
     /*
      * do something else
      */
 
-    return;
+    exit(0);
 }
 
-static void clean_rules_link(out_rules_link head){
+static void clean_rules_link(void){
     out_rules_link p;
     while(head){
         p = head;
         head = head->next;
         free(p);
+    }
+    err_msg("\n");
+    err_msg("out rules clean");
+}
+
+void out_rules_list(int  fd){
+    out_rules_link p = head;
+    char buff[20];
+    char tmp[MAX_LINE_LEN];
+    while(p){
+        //fputf("\n", out);
+        //fprintf(out, "local port:%d",ntohs(p->lport));
+        //fprintf(out, "remote address:%s",inet_ntop(AF_INET, &(p->raddr), buff, 20));
+        //fprintf(out, "remote port:%d",ntohs(p->rport));
+        //fprintf(out, "protocol:%s", getprotobynumber(p->proto)->p_name);
+        //fprintf(out, "target:%s", p->target == ACCEPT ? "ACCEPT" : "DROP");
+        sprintf(tmp, "localport:%d\tremote address:%s\tremote port:%d\tprotocol:%s\ttarget:%s\n",
+                ntohs(p->lport), inet_ntop(AF_INET, &(p->raddr), buff, 20),
+                ntohs(p->rport), getprotobynumber(p->proto)->p_name,
+                p->target == ACCEPT ? "ACCEPT" : "DROP" );
+
+
+        if(write(fd, tmp, strlen(tmp)) < 0)
+            err_sys("write error");
+
+        p = p->next;
     }
 }
