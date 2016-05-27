@@ -23,6 +23,7 @@
 #include<linux/netfilter.h>
 #include<libnetfilter_queue/libnetfilter_queue.h>
 #include<signal.h>
+#include<pthread.h>
 
 
 #include"parse.h"
@@ -85,6 +86,8 @@ void do_it (int connfd);
 void send_cmd_to_serv(char *);
 
 int rule_del(int );
+
+void * thread_nfq_out(void * arg);
 
 #ifdef __LITTLE_ENDIAN
 #define IPQUAD(addr) \

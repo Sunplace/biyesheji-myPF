@@ -20,6 +20,8 @@ void err_ret(const char *, ...);
 
 void err_msg(const char *, ...);
 
+void err_exit(int error, const char *fmt, ...);
+
 
 
 #endif

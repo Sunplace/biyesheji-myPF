@@ -1,5 +1,5 @@
 a.out : myerr.o parse.o pf.c
-	gcc myerr.o parse.o pf.c -lnetfilter_queue -o a.out
+	gcc myerr.o parse.o pf.c -lnetfilter_queue -lpthread -o a.out
 
 myerr.o : myerr.c
 	gcc -c myerr.c

@@ -5,6 +5,8 @@
 #include"pf.h"
 
 out_rules_link head = NULL;         //out rule link head
+struct nfq_handle * h;
+pthread_mutex_t out_rules_lock = PTHREAD_MUTEX_INITIALIZER;
 
 
 int main(int argc,  char *argv[]){
@@ -54,8 +56,8 @@ int main(int argc,  char *argv[]){
             signal(SIGINT, sig_init_exit);          //init exit clean
             out_rules_list(STDOUT_FILENO);
             err_msg("\n");
-            //init_nfqueue();        //initiate nfqueue
-            set_rpc_server();       //open a tcp server ,receive the rpc command
+            init_nfqueue();        //initiate nfqueue
+            //set_rpc_server();       //open a tcp server ,receive the rpc command
 
             //to do
             //running daemon
@@ -211,6 +213,7 @@ void out_rule_insert(u_int16_t lport, u_int32_t raddr, u_int16_t rport, int prot
     p->rport = rport;
     p->proto = proto;
     p->target = targ;
+    pthread_mutex_lock(&out_rules_lock);
     if(!head){
         head = p;
         p->next = NULL;
@@ -220,6 +223,7 @@ void out_rule_insert(u_int16_t lport, u_int32_t raddr, u_int16_t rport, int prot
         head = p;
         head->next = q;
     }
+    pthread_mutex_unlock(&out_rules_lock);
     return;
 }
 
@@ -292,15 +296,23 @@ void init_nfqueue(void){
     if(nfq_set_mode(qh, NFQNL_COPY_PACKET, 40) < 0)
         err_sys("nfq_set_mode()");
     int fd = nfq_fd(h);
+    int err;
+    pthread_t out_tid;
+    err = pthread_create(&out_tid, NULL, thread_nfq_out, (void *)&fd);
+    if(err != 0)
+        err_exit(err, "can't create thread");
+}
+
+void * thread_nfq_out(void * arg){
+
     char buf[1024];
     int rv;
+    int fd = *((int *)arg);
 
     while ((rv = recv(fd, buf, sizeof(buf), 0)) >= 0){
         printf("packet received.\n");
         nfq_handle_packet(h, buf, rv);
     }
-
-
 }
 
 static int cb (struct nfq_q_handle * qh, struct nfgenmsg * nfmsg , struct nfq_data * nfa, void * data){
@@ -368,17 +380,21 @@ enum TARGET execute_verdict(u_int16_t lport, u_int32_t raddr, u_int16_t rport, i
     /*
      * to do
      */
+    pthread_mutex_lock(&out_rules_lock);
     out_rules_link p = head;
     while(p){
         if(    ( !(p->lport) || (lport == p->lport) )     &&    ( !(p->raddr) || (raddr == p->raddr)  )   && \
-                    ( !(p->rport) || (rport == p->rport) )    &&   ( proto == p->proto)    )
+                    ( !(p->rport) || (rport == p->rport) )    &&   ( proto == p->proto)    ){
             //find a rule;
+            pthread_mutex_unlock(&out_rules_lock);
             return p->target;
+        }
         //if(p->lport == lport && p->raddr == raddr && p->rport == rport && p->proto == proto){
         p = p->next;
     }
 
 
+    pthread_mutex_unlock(&out_rules_lock);
     return ACCEPT;          //default target;
 
 }
@@ -479,6 +495,7 @@ int rule_del(int num){
     if(num <= 0)
         return -1;
     out_rules_link p, pre = NULL;
+    pthread_mutex_lock(&out_rules_lock);
     p = head;
     int i = num;
     while(--i){
@@ -489,14 +506,17 @@ int rule_del(int num){
         else
             break;
     }
-    if(!p)
+    if(!p){
+        pthread_mutex_unlock(&out_rules_lock);
         return -1;
+    }
     else{
         if(!pre)
             head = p->next;
         else
             pre->next = p->next;
         free(p);
+        pthread_mutex_unlock(&out_rules_lock);
         return num;
     }
 }
@@ -528,6 +548,7 @@ static void clean_rules_link(void){
 }
 
 void out_rules_list(int  fd){
+    pthread_mutex_lock(&out_rules_lock);
     out_rules_link p = head;
     char buff[20];
     char tmp[MAX_LINE_LEN];
@@ -549,4 +570,5 @@ void out_rules_list(int  fd){
 
         p = p->next;
     }
+    pthread_mutex_unlock(&out_rules_lock);
 }
