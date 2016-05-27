@@ -43,6 +43,11 @@ enum Proto {
     UDP
 };
 
+enum DIRECTION {        //connection direction
+    IN,
+    OUT
+};
+
 
 typedef struct out_rule_node{
     u_int16_t lport;        //local port
@@ -51,7 +56,7 @@ typedef struct out_rule_node{
     int proto;              //protocol
     enum TARGET target;          //packet target
     struct out_rule_node * next;    //next rule node
-}out_nd, * out_rules_link;
+}rule_nd, * rules_link;
 
 
 
@@ -69,25 +74,27 @@ static int cb (struct nfq_q_handle * qh, struct nfgenmsg * nfmsg , struct nfq_da
 
 void set_rpc_server(void);
 
-void out_rule_insert(u_int16_t lport, u_int32_t raddr, u_int16_t rport, int proto, enum TARGET targ);
+void rule_insert(u_int16_t lport, u_int32_t raddr, u_int16_t rport, int proto, enum TARGET targ, enum DIRECTION direc);
 
-void parse_rules(char line[], u_int16_t * lport_n_p, u_int32_t * raddr_p, u_int16_t * rport_n_p, int * proto_p, enum TARGET * targ_p);
+void parse_rules(char line[], u_int16_t * lport_n_p, u_int32_t * raddr_p, u_int16_t * rport_n_p, int * proto_p, enum TARGET * targ_p, enum DIRECTION * direc_p);
 
-enum TARGET execute_verdict(u_int16_t lport, u_int32_t raddr, u_int16_t rport, int proto);
+enum TARGET execute_verdict(u_int16_t lport, u_int32_t raddr, u_int16_t rport, int proto, void * threaddata);
 
 static void sig_init_exit(int signo);
 
 static void clean_rules_link(void);
 
-void out_rules_list(int fd);
+void rules_list(int fd);
 
 void do_it (int connfd);
 
 void send_cmd_to_serv(char *);
 
-int rule_del(int );
+int rule_del(int num, enum DIRECTION direc);
 
 void * thread_nfq_out(void * arg);
+
+void * thread_nfq_in(void * arg);
 
 #ifdef __LITTLE_ENDIAN
 #define IPQUAD(addr) \

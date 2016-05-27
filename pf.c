@@ -4,9 +4,12 @@
 
 #include"pf.h"
 
-out_rules_link head = NULL;         //out rule link head
-struct nfq_handle * h;
+rules_link out_head = NULL;         //out rule link head
+rules_link in_head = NULL;         //in rule link head
+struct nfq_handle * h_out;
+struct nfq_handle * h_in;
 pthread_mutex_t out_rules_lock = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t in_rules_lock = PTHREAD_MUTEX_INITIALIZER;
 
 
 int main(int argc,  char *argv[]){
@@ -54,10 +57,10 @@ int main(int argc,  char *argv[]){
             err_msg("\n");
             init_iptables();      //initiate iptables
             signal(SIGINT, sig_init_exit);          //init exit clean
-            out_rules_list(STDOUT_FILENO);
+            rules_list(STDOUT_FILENO);
             err_msg("\n");
             init_nfqueue();        //initiate nfqueue
-            //set_rpc_server();       //open a tcp server ,receive the rpc command
+            set_rpc_server();       //open a tcp server ,receive the rpc command
 
             //to do
             //running daemon
@@ -169,8 +172,8 @@ void init_iptables(void){
      */
     //do nothing
     return;
-    int ret_out = system("iptables -I OUTPUT -m conntrack --ctstate NEW -j NFQUEUE --queue-num 11220");
-    int ret_in = system("iptables -I INPUT -m conntrack --ctstate NEW -j NFQUEUE --queue-num 11221");
+    int ret_out = system("iptables -A OUTPUT -m conntrack --ctstate NEW -j NFQUEUE --queue-num 11220");
+    int ret_in = system("iptables -A INPUT -m conntrack --ctstate NEW -j NFQUEUE --queue-num 11221");
     if(ret_out == -1 || ret_in == -1)
         err_sys("init_iptables");
     return;
@@ -186,58 +189,98 @@ void rules_file_load(void){
     if((fp = fopen("./out_rules_file","r")) == NULL)
         err_sys("fopen error");
     char line[MAX_LINE_LEN];
-    u_int32_t raddr;
+    u_int32_t raddr_n;
     u_int16_t lport_n;
     u_int16_t rport_n;
     int protocol;
     enum TARGET targ;
+    enum DIRECTION direc;
     
     while((fgets(line, MAX_LINE_LEN, fp)) != NULL){
         if(line[0] == '#')      //skip comment
             continue;
         err_msg("%s",line);
-        parse_rules(line, &lport_n, &raddr, &rport_n, &protocol, &targ);
-        out_rule_insert(lport_n, raddr, rport_n, protocol, targ);
+        parse_rules(line, &lport_n, &raddr_n, &rport_n, &protocol, &targ, &direc);
+        rule_insert(lport_n, raddr_n, rport_n, protocol, targ, direc);
     }
     fclose(fp);
+
+    //load the in rule file
+    FILE * fp1;
+    if((fp1 = fopen("./in_rules_file", "r")) == NULL)
+        err_sys("fopen error");
+    while((fgets(line, MAX_LINE_LEN, fp)) != NULL){
+        if(line[0] == '#')      //skip comment
+            continue;
+        err_msg("%s",line);
+        parse_rules(line, &lport_n, &raddr_n, &rport_n, &protocol, &targ, &direc);
+        rule_insert(lport_n, raddr_n, rport_n, protocol, targ, direc);
+    }
+    fclose(fp1);
+    
+    
     return;
 }
 
 
-void out_rule_insert(u_int16_t lport, u_int32_t raddr, u_int16_t rport, int proto, enum TARGET targ){
-    out_rules_link p;
-    if((p = malloc(sizeof(out_nd))) == NULL)
+void rule_insert(u_int16_t lport, u_int32_t raddr, u_int16_t rport, int proto, enum TARGET targ, enum DIRECTION direc){
+    rules_link p, * head_p;
+    if((p = malloc(sizeof(rule_nd))) == NULL)
         err_sys("malloc error");
     p->lport = lport;
     p->raddr = raddr;
     p->rport = rport;
     p->proto = proto;
     p->target = targ;
-    pthread_mutex_lock(&out_rules_lock);
-    if(!head){
-        head = p;
+    if(direc == OUT){                   //direc is out
+        head_p = &out_head;
+        pthread_mutex_lock(&out_rules_lock);
+    }
+    else{                               //direc is in
+        head_p = &in_head;
+        pthread_mutex_lock(&in_rules_lock);
+    }
+
+    //critical zone
+    if(!(*head_p)){
+        *head_p = p;
         p->next = NULL;
     }
     else{
-        out_rules_link q = head;
-        head = p;
-        head->next = q;
+        rules_link q = *head_p;
+        *head_p = p;
+        (*head_p)->next = q;
     }
-    pthread_mutex_unlock(&out_rules_lock);
+    //critical zone
+    
+    if(direc == OUT){                   //direc is out
+        pthread_mutex_unlock(&out_rules_lock);
+    }
+    else{                               //direc is in
+        pthread_mutex_unlock(&in_rules_lock);
+    }
     return;
 }
 
 
 
 
-void parse_rules(char line[], u_int16_t * lport_n_p, u_int32_t * raddr_p, u_int16_t * rport_n_p, int * proto_p, enum TARGET * targ_p){
+void parse_rules(char line[], u_int16_t * lport_n_p, u_int32_t * raddr_p, u_int16_t * rport_n_p, int * proto_p, enum TARGET * targ_p, enum DIRECTION * direc_p){
         char lport[10];         //local port
         char raddr[20];         //remote address
         char rport[10];         //remote port
         char proto[5];          //protocol
         char target[10];        //target
-        if((sscanf(line, "%s%s%s%s%s", lport, raddr, rport, proto, target)) != 5)
-            err_quit("out rules file have wrong rule:%s", line);
+        char direc[5];          //connection direction
+        if((sscanf(line, "%s%s%s%s%s%s", direc, lport, raddr, rport, proto, target)) != 6)
+            err_quit("rules file have wrong rule:%s", line);
+        if((strncmp(direc, "OUT", 3)) == 0)
+            *direc_p = OUT;
+        else if((strncmp(direc, "IN", 2)) == 0)
+            *direc_p = IN;
+        else
+            err_quit("unknow direction:%s", direc);
+
         if(strncmp(raddr, "-", 1) == 0)
             *raddr_p = 0;              //all port
         else
@@ -279,26 +322,55 @@ void init_nfqueue(void){
     /*
      * to do
      */
-    struct nfq_handle * h;
-    h = nfq_open();
-    if(! h){
+    int err;
+    enum DIRECTION direc;
+    //struct nfq_handle * h;
+    //out queue handler
+    direc = OUT;
+    h_out = nfq_open();
+    if(! h_out){
         err_sys("nfq_open()");
     }
-    if(nfq_unbind_pf(h, AF_INET) < 0){
+    if(nfq_unbind_pf(h_out, AF_INET) < 0){
         err_sys("nfq_unbind()");
     }
-    if(nfq_bind_pf(h, AF_INET) < 0)
+    if(nfq_bind_pf(h_out, AF_INET) < 0)
         err_sys("nfq_bind()");
-    struct nfq_q_handle * qh;
-    qh = nfq_create_queue(h, 11220, &cb, NULL);
-    if(! qh)
+    struct nfq_q_handle * qh_out;
+    qh_out = nfq_create_queue(h_out, 11220, &cb, (void *)&direc);
+    if(! qh_out)
         err_sys("nfq_create_queue()");
-    if(nfq_set_mode(qh, NFQNL_COPY_PACKET, 40) < 0)
+    if(nfq_set_mode(qh_out, NFQNL_COPY_PACKET, 40) < 0)
         err_sys("nfq_set_mode()");
-    int fd = nfq_fd(h);
-    int err;
+    int fd_out = nfq_fd(h_out);
     pthread_t out_tid;
-    err = pthread_create(&out_tid, NULL, thread_nfq_out, (void *)&fd);
+    err = pthread_create(&out_tid, NULL, thread_nfq_out, (void *)&fd_out);
+    err_msg("created out queue handle pthread");
+    if(err != 0)
+        err_exit(err, "can't create thread");
+
+
+    //int queue handler
+    direc = IN;
+    h_in= nfq_open();
+    if(! h_in){
+        err_sys("nfq_open()");
+    }
+    if(nfq_unbind_pf(h_in, AF_INET) < 0){
+        err_sys("nfq_unbind()");
+    }
+    if(nfq_bind_pf(h_in, AF_INET) < 0)
+        err_sys("nfq_bind()");
+    struct nfq_q_handle * qh_in;
+    qh_in = nfq_create_queue(h_in, 11220, &cb, (void *)&direc);
+    if(! qh_in)
+        err_sys("nfq_create_queue()");
+    if(nfq_set_mode(qh_in, NFQNL_COPY_PACKET, 40) < 0)
+        err_sys("nfq_set_mode()");
+    int fd_in = nfq_fd(h_in);
+    pthread_t in_tid;
+    err = pthread_create(&in_tid, NULL, thread_nfq_in, (void *)&fd_in);
+    err_msg("created in queue handle pthread");
     if(err != 0)
         err_exit(err, "can't create thread");
 }
@@ -308,21 +380,37 @@ void * thread_nfq_out(void * arg){
     char buf[1024];
     int rv;
     int fd = *((int *)arg);
+    err_msg("pthread out queue handle running...");
 
     while ((rv = recv(fd, buf, sizeof(buf), 0)) >= 0){
         printf("packet received.\n");
-        nfq_handle_packet(h, buf, rv);
+        nfq_handle_packet(h_out, buf, rv);
     }
 }
 
-static int cb (struct nfq_q_handle * qh, struct nfgenmsg * nfmsg , struct nfq_data * nfa, void * data){
+
+void * thread_nfq_in(void * arg){
+
+    char buf[1024];
+    int rv;
+    int fd = *((int *)arg);
+    err_msg("pthread in queue handle running...");
+
+    while ((rv = recv(fd, buf, sizeof(buf), 0)) >= 0){
+        printf("packet received.\n");
+        nfq_handle_packet(h_in, buf, rv);
+    }
+}
+
+static int cb (struct nfq_q_handle * qh, struct nfgenmsg * nfmsg , struct nfq_data * nfa, void * threaddata){
     (void)nfmsg;
-    (void)data;
 
     struct nfqnl_msg_packet_hdr * ph;
     struct iphdr * ip ;
     int ipdata_len;
     u_int32_t id = 0;
+    //enum DIRECTION direc;
+    //if(*((enum DIRECION *)threaddata) == 
 
     ph = nfq_get_msg_packet_hdr(nfa);
     if(ph){
@@ -348,9 +436,9 @@ static int cb (struct nfq_q_handle * qh, struct nfgenmsg * nfmsg , struct nfq_da
         rport = udp->dest;
     }
     else{
-        return nfq_set_verdict(qh, id, NF_ACCEPT, (u_int32_t)ipdata_len, (unsigned char *)ip);
+        return nfq_set_verdict(qh, id, NF_ACCEPT, 0, NULL);
     }
-    if(execute_verdict(lport, raddr, rport, proto) == ACCEPT){
+    if(execute_verdict(lport, raddr, rport, proto, threaddata) == ACCEPT){
         err_msg("packet accepted!");
         printf("len %d iphdr %d %u.%u.%u.%u:%u -> ",ipdata_len,(ip->ihl)<<2,IPQUAD(ip->saddr),ntohs(lport));
         printf("%u.%u.%u.%u:%u  proto:%s",IPQUAD(raddr),ntohs(rport),getprotobynumber(ip->protocol)->p_name);
@@ -376,25 +464,49 @@ static int cb (struct nfq_q_handle * qh, struct nfgenmsg * nfmsg , struct nfq_da
     //return nfq_set_verdict(qh, id, NF_ACCEPT, (u_int32_t)pdata_len, pdata);
 }
 
-enum TARGET execute_verdict(u_int16_t lport, u_int32_t raddr, u_int16_t rport, int proto){
+enum TARGET execute_verdict(u_int16_t lport, u_int32_t raddr, u_int16_t rport, int proto, void * direct_p){
     /*
      * to do
      */
-    pthread_mutex_lock(&out_rules_lock);
-    out_rules_link p = head;
+    rules_link p;
+    if(*((enum DIRECTION *)direct_p) == OUT){
+        pthread_mutex_lock(&out_rules_lock);
+        p = out_head;
+    }
+    else{
+        pthread_mutex_lock(&in_rules_lock);
+        p = in_head;
+    }
+
+    //critical zone
     while(p){
         if(    ( !(p->lport) || (lport == p->lport) )     &&    ( !(p->raddr) || (raddr == p->raddr)  )   && \
                     ( !(p->rport) || (rport == p->rport) )    &&   ( proto == p->proto)    ){
             //find a rule;
-            pthread_mutex_unlock(&out_rules_lock);
+            //pthread_mutex_unlock(&out_rules_lock);
+            //go to REDIREC_TARG;
+            if(*((enum DIRECTION *)direct_p) == OUT){
+                pthread_mutex_unlock(&out_rules_lock);
+            }
+            else{
+                pthread_mutex_unlock(&in_rules_lock);
+            }
             return p->target;
         }
         //if(p->lport == lport && p->raddr == raddr && p->rport == rport && p->proto == proto){
         p = p->next;
     }
+    //critical zone
 
 
-    pthread_mutex_unlock(&out_rules_lock);
+//REDIREC_TARG:
+    if(*((enum DIRECTION *)direct_p) == OUT){
+        pthread_mutex_unlock(&out_rules_lock);
+    }
+    else{
+        pthread_mutex_unlock(&in_rules_lock);
+    }
+    //return p->target;
     return ACCEPT;          //default target;
 
 }
@@ -446,24 +558,32 @@ void do_it (int connfd){
     u_int16_t rport;
     u_int16_t lport;
     enum TARGET targ;
+    enum DIRECTION direc;
+    char direction[5];
     int proto;
     if((n = recv(connfd, buff, MAX_LINE_LEN, 0)) < 0)           //receive command
         err_sys("recv error");
     buff[n] = '\0';
     err_msg("%s",buff);
     if(strncmp(buff, "-a", 2) == 0){                    //add rule
-        parse_rules(buff+2, &lport, &raddr, &rport, &proto, &targ);
-        out_rule_insert(lport, raddr, rport, proto, targ);
+        parse_rules(buff+2, &lport, &raddr, &rport, &proto, &targ, &direc);
+        rule_insert(lport, raddr, rport, proto, targ, direc);
         err_msg("rule add:%s", buff+2);
         if(send(connfd, "rule added", 10, 0) < 0)
             err_sys("send error");
     }
     else if(strncmp(buff, "-d", 2) == 0){               //delete rule
         int num;
-        if(sscanf(buff+2, "%d", &num) != 1)
+        if(sscanf(buff+2, "%d%s", &num, direction) != 2)
             err_quit("rule delete,unknow:%s", buff+2);
-        err_msg("rule del:%d", num);
-        if(rule_del(num) < 0){
+        if(strncmp(direction, "out", 3) == 0)
+            direc = OUT;
+        else if(strncmp(direction, "IN", 2) == 0)
+            direc = IN;
+        else
+            err_quit("rule delete,unknow:%s", direction);
+        err_msg("rule del,queue:%s,num:%d", direction, num);
+        if(rule_del(num, direc) < 0){
             if(send(connfd, "rule delete failed", 18, 0) < 0)
                 err_sys("send error");
         }
@@ -474,7 +594,7 @@ void do_it (int connfd){
     }
     else if(strncmp(buff, "--list", 6) == 0){               //rule list
         err_msg("rules list");
-        out_rules_list(connfd);
+        rules_list(connfd);
         err_msg("rules list");
     }
     else
@@ -487,16 +607,25 @@ void do_it (int connfd){
 
 }
 
-int rule_del(int num){
+int rule_del(int num, enum DIRECTION direc){
     /*
      * to do
      */
     //
     if(num <= 0)
         return -1;
-    out_rules_link p, pre = NULL;
-    pthread_mutex_lock(&out_rules_lock);
-    p = head;
+    rules_link p, pre = NULL, * head_p;
+    if(direc == OUT){
+        pthread_mutex_lock(&out_rules_lock);
+        head_p = &out_head;
+    }
+    else{
+        pthread_mutex_lock(&in_rules_lock);
+        head_p = &in_head;
+    }
+
+    //critical zone
+    p = *head_p;
     int i = num;
     while(--i){
         if(p){
@@ -507,16 +636,22 @@ int rule_del(int num){
             break;
     }
     if(!p){
-        pthread_mutex_unlock(&out_rules_lock);
+        if(direc == OUT)
+            pthread_mutex_unlock(&out_rules_lock);
+        else
+            pthread_mutex_unlock(&in_rules_lock);
         return -1;
     }
     else{
         if(!pre)
-            head = p->next;
+            *head_p = p->next;
         else
             pre->next = p->next;
         free(p);
-        pthread_mutex_unlock(&out_rules_lock);
+        if(direc == OUT)
+            pthread_mutex_unlock(&out_rules_lock);
+        else
+            pthread_mutex_unlock(&in_rules_lock);
         return num;
     }
 }
@@ -525,10 +660,11 @@ int rule_del(int num){
 
 
 static void sig_init_exit(int signo){
-    out_rules_list(STDOUT_FILENO);
+    rules_list(STDOUT_FILENO);
     clean_rules_link();
-    err_msg("head is %s null", head ? "not" : " ");
-    out_rules_list(STDOUT_FILENO);
+    err_msg("out head is %s null", out_head ? "not" : " ");
+    err_msg("in head is %s null", in_head ? "not" : " ");
+    rules_list(STDOUT_FILENO);
     /*
      * do something else
      */
@@ -537,21 +673,32 @@ static void sig_init_exit(int signo){
 }
 
 static void clean_rules_link(void){
-    out_rules_link p;
-    while(head){
-        p = head;
-        head = head->next;
+    rules_link p;
+    while(out_head){
+        p = out_head;
+        out_head = out_head->next;
         free(p);
     }
     err_msg("\n");
     err_msg("out rules clean");
+
+    while(in_head){
+        p = in_head;
+        in_head = in_head->next;
+        free(p);
+    }
+    err_msg("\n");
+    err_msg("in rules clean");
 }
 
-void out_rules_list(int  fd){
-    pthread_mutex_lock(&out_rules_lock);
-    out_rules_link p = head;
+void rules_list(int  fd){
+    rules_link p;
     char buff[20];
     char tmp[MAX_LINE_LEN];
+
+    //out queue list
+    pthread_mutex_lock(&out_rules_lock);
+    p = out_head;
     while(p){
         //fputf("\n", out);
         //fprintf(out, "local port:%d",ntohs(p->lport));
@@ -571,4 +718,28 @@ void out_rules_list(int  fd){
         p = p->next;
     }
     pthread_mutex_unlock(&out_rules_lock);
+
+
+    //in queue list
+    pthread_mutex_lock(&in_rules_lock);
+    p = in_head;
+    while(p){
+        //fputf("\n", out);
+        //fprintf(out, "local port:%d",ntohs(p->lport));
+        //fprintf(out, "remote address:%s",inet_ntop(AF_INET, &(p->raddr), buff, 20));
+        //fprintf(out, "remote port:%d",ntohs(p->rport));
+        //fprintf(out, "protocol:%s", getprotobynumber(p->proto)->p_name);
+        //fprintf(out, "target:%s", p->target == ACCEPT ? "ACCEPT" : "DROP");
+        sprintf(tmp, "localport:%d\tremote address:%s\tremote port:%d\tprotocol:%s\ttarget:%s\n",
+                ntohs(p->lport), inet_ntop(AF_INET, &(p->raddr), buff, 20),
+                ntohs(p->rport), getprotobynumber(p->proto)->p_name,
+                p->target == ACCEPT ? "ACCEPT" : "DROP" );
+
+
+        if(write(fd, tmp, strlen(tmp)) < 0)
+            err_sys("write error");
+
+        p = p->next;
+    }
+    pthread_mutex_unlock(&in_rules_lock);
 }
