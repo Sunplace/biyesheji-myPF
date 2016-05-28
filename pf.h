@@ -78,7 +78,7 @@ void rule_insert(u_int16_t lport, u_int32_t raddr, u_int16_t rport, int proto, e
 
 void parse_rules(char line[], u_int16_t * lport_n_p, u_int32_t * raddr_p, u_int16_t * rport_n_p, int * proto_p, enum TARGET * targ_p, enum DIRECTION * direc_p);
 
-enum TARGET execute_verdict(u_int16_t lport, u_int32_t raddr, u_int16_t rport, int proto, void * threaddata);
+enum TARGET execute_verdict(u_int16_t lport, u_int32_t raddr, u_int16_t rport, int proto, enum DIRECTION direc);
 
 static void sig_init_exit(int signo);
 

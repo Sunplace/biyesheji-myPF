@@ -10,6 +10,8 @@ struct nfq_handle * h_out;
 struct nfq_handle * h_in;
 pthread_mutex_t out_rules_lock = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t in_rules_lock = PTHREAD_MUTEX_INITIALIZER;
+enum DIRECTION out = OUT;
+enum DIRECTION in = IN;
 
 
 int main(int argc,  char *argv[]){
@@ -323,10 +325,9 @@ void init_nfqueue(void){
      * to do
      */
     int err;
-    enum DIRECTION direc;
     //struct nfq_handle * h;
     //out queue handler
-    direc = OUT;
+    //out = OUT;
     h_out = nfq_open();
     if(! h_out){
         err_sys("nfq_open()");
@@ -337,7 +338,7 @@ void init_nfqueue(void){
     if(nfq_bind_pf(h_out, AF_INET) < 0)
         err_sys("nfq_bind()");
     struct nfq_q_handle * qh_out;
-    qh_out = nfq_create_queue(h_out, 11220, &cb, (void *)&direc);
+    qh_out = nfq_create_queue(h_out, 11220, &cb, (void *)&out);
     if(! qh_out)
         err_sys("nfq_create_queue()");
     if(nfq_set_mode(qh_out, NFQNL_COPY_PACKET, 40) < 0)
@@ -351,7 +352,7 @@ void init_nfqueue(void){
 
 
     //int queue handler
-    direc = IN;
+    enum DIRECTION in = IN;
     h_in= nfq_open();
     if(! h_in){
         err_sys("nfq_open()");
@@ -362,7 +363,7 @@ void init_nfqueue(void){
     if(nfq_bind_pf(h_in, AF_INET) < 0)
         err_sys("nfq_bind()");
     struct nfq_q_handle * qh_in;
-    qh_in = nfq_create_queue(h_in, 11220, &cb, (void *)&direc);
+    qh_in = nfq_create_queue(h_in, 11221, &cb, (void *)&in);
     if(! qh_in)
         err_sys("nfq_create_queue()");
     if(nfq_set_mode(qh_in, NFQNL_COPY_PACKET, 40) < 0)
@@ -405,12 +406,15 @@ void * thread_nfq_in(void * arg){
 static int cb (struct nfq_q_handle * qh, struct nfgenmsg * nfmsg , struct nfq_data * nfa, void * threaddata){
     (void)nfmsg;
 
+
     struct nfqnl_msg_packet_hdr * ph;
     struct iphdr * ip ;
     int ipdata_len;
     u_int32_t id = 0;
-    //enum DIRECTION direc;
+    enum DIRECTION direc;
     //if(*((enum DIRECION *)threaddata) == 
+    direc = *((enum DIRECTION *)threaddata);
+    err_msg("call back is running,direction:%s", ((direc == OUT) ? "OUT" : "IN"));
 
     ph = nfq_get_msg_packet_hdr(nfa);
     if(ph){
@@ -422,34 +426,35 @@ static int cb (struct nfq_q_handle * qh, struct nfgenmsg * nfmsg , struct nfq_da
     }
     //char raddr[INET_ADDRSTRLEN];
     //inet_ntop(AF_INET, &(ip->daddr), raddr, INET_ADDRSTRLEN);
-    u_int32_t raddr = ip->daddr;
+    u_int32_t raddr = (direc == OUT) ? ip->daddr : ip->saddr;
+    u_int32_t laddr = (direc == OUT) ? ip->saddr : ip->daddr;
     u_int16_t lport,rport;
     int proto = ip->protocol;
     if(proto == IPPROTO_TCP){
         struct tcphdr * tcp = ( struct tcphdr * )((char *)ip + (4 * ip->ihl));
-        lport = tcp->source;
-        rport = tcp->dest;
+        lport = (direc == OUT) ? tcp->source : tcp->dest;
+        rport = (direc == OUT) ? tcp->dest : tcp->source;
     }
     else if(proto == IPPROTO_UDP){
         struct udphdr * udp = (struct udphdr * )((char *)ip + (4 * ip->ihl));
-        lport = udp->source;
-        rport = udp->dest;
+        lport = (direc == OUT) ? udp->source : udp->dest;
+        rport = (direc == OUT) ? udp->dest : udp->source;
     }
     else{
         return nfq_set_verdict(qh, id, NF_ACCEPT, 0, NULL);
     }
-    if(execute_verdict(lport, raddr, rport, proto, threaddata) == ACCEPT){
+    if(execute_verdict(lport, raddr, rport, proto, direc) == ACCEPT){
         err_msg("packet accepted!");
-        printf("len %d iphdr %d %u.%u.%u.%u:%u -> ",ipdata_len,(ip->ihl)<<2,IPQUAD(ip->saddr),ntohs(lport));
-        printf("%u.%u.%u.%u:%u  proto:%s",IPQUAD(raddr),ntohs(rport),getprotobynumber(ip->protocol)->p_name);
+        printf("len %d iphdr %d %u.%u.%u.%u:%u %s ",ipdata_len,(ip->ihl)<<2,IPQUAD(laddr),ntohs(lport), ((direc == OUT) ? "->" : "<-"));
+        printf("%u.%u.%u.%u:%u  proto:%s",IPQUAD(raddr),ntohs(rport),getprotobynumber(proto)->p_name);
         err_msg("\n");
 
         return nfq_set_verdict(qh, id, NF_ACCEPT, 0, NULL);
     }
     else{
         err_msg("packet droped!");
-        printf("len %d iphdr %d %u.%u.%u.%u:%u -> ",ipdata_len,(ip->ihl)<<2,IPQUAD(ip->saddr),ntohs(lport));
-        printf("%u.%u.%u.%u:%u  proto:%s",IPQUAD(raddr),ntohs(rport),getprotobynumber(ip->protocol)->p_name);
+        printf("len %d iphdr %d %u.%u.%u.%u:%u %s ",ipdata_len,(ip->ihl)<<2,IPQUAD(laddr),ntohs(lport), ((direc == OUT) ? "->" : "<-"));
+        printf("%u.%u.%u.%u:%u  proto:%s",IPQUAD(raddr),ntohs(rport),getprotobynumber(proto)->p_name);
         err_msg("\n");
 
         return nfq_set_verdict(qh, id, NF_DROP, 0, NULL);
@@ -464,12 +469,12 @@ static int cb (struct nfq_q_handle * qh, struct nfgenmsg * nfmsg , struct nfq_da
     //return nfq_set_verdict(qh, id, NF_ACCEPT, (u_int32_t)pdata_len, pdata);
 }
 
-enum TARGET execute_verdict(u_int16_t lport, u_int32_t raddr, u_int16_t rport, int proto, void * direct_p){
+enum TARGET execute_verdict(u_int16_t lport, u_int32_t raddr, u_int16_t rport, int proto, enum DIRECTION direc){
     /*
      * to do
      */
     rules_link p;
-    if(*((enum DIRECTION *)direct_p) == OUT){
+    if(direc == OUT){
         pthread_mutex_lock(&out_rules_lock);
         p = out_head;
     }
@@ -479,13 +484,14 @@ enum TARGET execute_verdict(u_int16_t lport, u_int32_t raddr, u_int16_t rport, i
     }
 
     //critical zone
+    err_msg("%s", (direc == OUT) ? "travel out rules link" : "travel in rules link");
     while(p){
         if(    ( !(p->lport) || (lport == p->lport) )     &&    ( !(p->raddr) || (raddr == p->raddr)  )   && \
                     ( !(p->rport) || (rport == p->rport) )    &&   ( proto == p->proto)    ){
             //find a rule;
             //pthread_mutex_unlock(&out_rules_lock);
             //go to REDIREC_TARG;
-            if(*((enum DIRECTION *)direct_p) == OUT){
+            if(direc == OUT){
                 pthread_mutex_unlock(&out_rules_lock);
             }
             else{
@@ -500,7 +506,7 @@ enum TARGET execute_verdict(u_int16_t lport, u_int32_t raddr, u_int16_t rport, i
 
 
 //REDIREC_TARG:
-    if(*((enum DIRECTION *)direct_p) == OUT){
+    if(direc == OUT){
         pthread_mutex_unlock(&out_rules_lock);
     }
     else{
@@ -574,9 +580,9 @@ void do_it (int connfd){
     }
     else if(strncmp(buff, "-d", 2) == 0){               //delete rule
         int num;
-        if(sscanf(buff+2, "%d%s", &num, direction) != 2)
+        if(sscanf(buff+2, "%s%d", direction, &num) != 2)
             err_quit("rule delete,unknow:%s", buff+2);
-        if(strncmp(direction, "out", 3) == 0)
+        if(strncmp(direction, "OUT", 3) == 0)
             direc = OUT;
         else if(strncmp(direction, "IN", 2) == 0)
             direc = IN;
@@ -696,6 +702,8 @@ void rules_list(int  fd){
     char buff[20];
     char tmp[MAX_LINE_LEN];
 
+    err_msg("\n");
+    err_msg("out rules list");
     //out queue list
     pthread_mutex_lock(&out_rules_lock);
     p = out_head;
@@ -706,7 +714,8 @@ void rules_list(int  fd){
         //fprintf(out, "remote port:%d",ntohs(p->rport));
         //fprintf(out, "protocol:%s", getprotobynumber(p->proto)->p_name);
         //fprintf(out, "target:%s", p->target == ACCEPT ? "ACCEPT" : "DROP");
-        sprintf(tmp, "localport:%d\tremote address:%s\tremote port:%d\tprotocol:%s\ttarget:%s\n",
+        sprintf(tmp, "direction:%s\tlocalport:%d\tremote address:%s\tremote port:%d\tprotocol:%s\ttarget:%s\n",
+                "OUT",
                 ntohs(p->lport), inet_ntop(AF_INET, &(p->raddr), buff, 20),
                 ntohs(p->rport), getprotobynumber(p->proto)->p_name,
                 p->target == ACCEPT ? "ACCEPT" : "DROP" );
@@ -720,6 +729,8 @@ void rules_list(int  fd){
     pthread_mutex_unlock(&out_rules_lock);
 
 
+    err_msg("\n");
+    err_msg("in rules list");
     //in queue list
     pthread_mutex_lock(&in_rules_lock);
     p = in_head;
@@ -730,7 +741,8 @@ void rules_list(int  fd){
         //fprintf(out, "remote port:%d",ntohs(p->rport));
         //fprintf(out, "protocol:%s", getprotobynumber(p->proto)->p_name);
         //fprintf(out, "target:%s", p->target == ACCEPT ? "ACCEPT" : "DROP");
-        sprintf(tmp, "localport:%d\tremote address:%s\tremote port:%d\tprotocol:%s\ttarget:%s\n",
+        sprintf(tmp, "direction:%s\tlocalport:%d\tremote address:%s\tremote port:%d\tprotocol:%s\ttarget:%s\n",
+                "IN",
                 ntohs(p->lport), inet_ntop(AF_INET, &(p->raddr), buff, 20),
                 ntohs(p->rport), getprotobynumber(p->proto)->p_name,
                 p->target == ACCEPT ? "ACCEPT" : "DROP" );

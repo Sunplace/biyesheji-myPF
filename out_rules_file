@@ -1,5 +1,5 @@
 # out rules file
-# local port        remote address          remote port         portocol        target
--                   121.42.168.57           22                  TCP             DROP
--                   121.42.168.56           2202                UDP             ACCEPT
--                   59.73.145.1             23                  TCP             DROP
+# direction     local port        remote address          remote port         portocol        target
+OUT             -                   121.42.168.57           22                  TCP             DROP
+OUT             -                   121.42.168.56           2202                UDP             ACCEPT
+OUT             -                   59.73.145.1             23                  TCP             DROP
