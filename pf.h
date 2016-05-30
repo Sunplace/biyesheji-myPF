@@ -24,6 +24,7 @@
 #include<libnetfilter_queue/libnetfilter_queue.h>
 #include<signal.h>
 #include<pthread.h>
+#include<syslog.h>
 
 
 #include"parse.h"

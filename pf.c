@@ -55,6 +55,7 @@ int main(int argc,  char *argv[]){
             err_quit("pf is running.\n");
         }
         else{   */
+            openlog("pf log", LOG_CONS | LOG_PID, 0);           //init log service
             rules_file_load();   //load the rules file
             err_msg("\n");
             init_iptables();      //initiate iptables
@@ -181,6 +182,20 @@ void init_iptables(void){
     return;
 }
 
+void end_pf_iptables(void){
+    /*
+     * to do
+     */
+    //do nothing
+    return;
+    int ret_out = system("iptables -D OUTPUT -m conntrack --ctstate NEW -j NFQUEUE --queue-num 11220");
+    int ret_in = system("iptables -D INPUT -m conntrack --ctstate NEW -j NFQUEUE --queue-num 11221");
+    if(ret_out == -1 || ret_in == -1)
+        err_sys("end_iptables error");
+    return;
+}
+    
+
 
 void rules_file_load(void){
     /*
@@ -261,6 +276,14 @@ void rule_insert(u_int16_t lport, u_int32_t raddr, u_int16_t rport, int proto, e
     else{                               //direc is in
         pthread_mutex_unlock(&in_rules_lock);
     }
+
+
+    //add rule insert log
+    syslog(LOG_USER | LOG_DEBUG, "rule add,direction:%s,local port:%u,remote address:%u.%u.%u.%u,remote port:%u,protocol:%s,target:%s.",
+            ((direc == OUT) ? "OUT" : "IN"), ntohs(lport),
+            IPQUAD(raddr), ntohs(rport), getprotobynumber(proto)->p_name,
+            ((targ == DROP) ? "DROP" : "ACCEPT"));
+
     return;
 }
 
@@ -329,12 +352,10 @@ void init_nfqueue(void){
     //out queue handler
     //out = OUT;
     h_out = nfq_open();
-    if(! h_out){
+    if(! h_out)
         err_sys("nfq_open()");
-    }
-    if(nfq_unbind_pf(h_out, AF_INET) < 0){
+    if(nfq_unbind_pf(h_out, AF_INET) < 0)
         err_sys("nfq_unbind()");
-    }
     if(nfq_bind_pf(h_out, AF_INET) < 0)
         err_sys("nfq_bind()");
     struct nfq_q_handle * qh_out;
@@ -449,6 +470,13 @@ static int cb (struct nfq_q_handle * qh, struct nfgenmsg * nfmsg , struct nfq_da
         printf("%u.%u.%u.%u:%u  proto:%s",IPQUAD(raddr),ntohs(rport),getprotobynumber(proto)->p_name);
         err_msg("\n");
 
+
+        //connection accept
+        syslog(LOG_USER | LOG_DEBUG, "connection accepted,direction:%s,local port:%u,remote address:%u.%u.%u.%u,remote port:%u,protocol:%s,target:%s.",
+                ((direc == OUT) ? "OUT" : "IN"), ntohs(lport),
+                IPQUAD(raddr), ntohs(rport), getprotobynumber(proto)->p_name,
+                "ACCEPT");
+
         return nfq_set_verdict(qh, id, NF_ACCEPT, 0, NULL);
     }
     else{
@@ -456,6 +484,13 @@ static int cb (struct nfq_q_handle * qh, struct nfgenmsg * nfmsg , struct nfq_da
         printf("len %d iphdr %d %u.%u.%u.%u:%u %s ",ipdata_len,(ip->ihl)<<2,IPQUAD(laddr),ntohs(lport), ((direc == OUT) ? "->" : "<-"));
         printf("%u.%u.%u.%u:%u  proto:%s",IPQUAD(raddr),ntohs(rport),getprotobynumber(proto)->p_name);
         err_msg("\n");
+
+
+        //connection droped. 
+        syslog(LOG_USER | LOG_DEBUG, "connection droped,direction:%s,local port:%u,remote address:%u.%u.%u.%u,remote port:%u,protocol:%s,target:%s.",
+                ((direc == OUT) ? "OUT" : "IN"), ntohs(lport),
+                IPQUAD(raddr), ntohs(rport), getprotobynumber(proto)->p_name,
+                "DROP");
 
         return nfq_set_verdict(qh, id, NF_DROP, 0, NULL);
     }
@@ -653,11 +688,19 @@ int rule_del(int num, enum DIRECTION direc){
             *head_p = p->next;
         else
             pre->next = p->next;
-        free(p);
         if(direc == OUT)
             pthread_mutex_unlock(&out_rules_lock);
         else
             pthread_mutex_unlock(&in_rules_lock);
+
+
+        //rule delete
+        syslog(LOG_USER | LOG_DEBUG, "rule delete,direction:%s,local port:%u,remote address:%u.%u.%u.%u,remote port:%u,protocol:%s,target:%s.",
+                ((direc == OUT) ? "OUT" : "IN"), ntohs(p->lport),
+                IPQUAD(p->raddr), ntohs(p->rport), getprotobynumber(p->proto)->p_name,
+                ((p->target == DROP) ? "DROP" : "ACCEPT"));
+
+        free(p);
         return num;
     }
 }
@@ -674,6 +717,19 @@ static void sig_init_exit(int signo){
     /*
      * do something else
      */
+    //because there is hard to gain the qh_in's value and the qh_out's value
+    //so do not to destory the queue
+    //and so close the h_out and h_in is not neccsary
+    //destory the nfqueue;
+    //nfq_destroy_queue();
+    //nfq_destroy_queue();
+    //err_msg("nfq_destory_queue");
+    //nfq_close(h_out);
+    //nfq_close(h_in);
+    //err_msg("nfq_close")
+
+    closelog();             //close the log service
+    err_msg("end log service");
 
     exit(0);
 }
