@@ -3,7 +3,7 @@
 import sys, os, thread, time, string, threading, subprocess
 from PyQt4.QtGui import QApplication, QStandardItem, QDialog, QIcon, QMenu, QSystemTrayIcon, QStandardItemModel, QAction, QMainWindow, QListWidget, QListWidgetItem, QWidget, QIntValidator, QStyledItemDelegate, QPainter, QStyleOptionViewItem, QFont, QTableWidgetItem, QPalette, QColor, QSortFilterProxyModel
 import resource
-from PyQt4.QtCore import pyqtSignal, Qt, QModelIndex, QRect, pyqtSlot, QVariant#, QString
+from PyQt4.QtCore import pyqtSignal, Qt, QModelIndex, QRect, pyqtSlot, QVariant, QString
 from PyQt4.QtNetwork import QHostInfo
 from multiprocessing import Pipe, Process, Lock
 from base64 import b64encode, b64decode
@@ -29,7 +29,7 @@ class Ui_MainWindow(object):
 
 class Ui_Dialog(object):
     def setupUi(self, DialogOut):
-        uic.loadUi(os.path.join(data_dir, 'popup.ui'), self)
+        uic.loadUi(os.path.join(data_dir, 'addrule.ui'), self)
 
 
 class queryDialog(QDialog):
@@ -124,6 +124,24 @@ class myDialogIn(queryDialog, Ui_Dialog):
         Ui_Dialog.__init__(self)
         queryDialog.__init__(self, 'IN')
 
+class myDialog(QDialog, Ui_Dialog):
+    #
+
+    def __init__(self):
+        QDialog.__init__(self)
+        self.setupUi(self)
+        self.setWindowTitle("PF addrule Dialog")
+        self.buttonBox.accepted.connect(self.Okclicked)
+        self.buttonBox.rejected.connect(self.Cancelclicked)
+        #self.buttonBox.button(QtGui.QDialogButtonBox.Reset).clicked().connect(self.foo)
+        #self.buttonBox.button(QtGui.QDialogButtonBox.Cancel).clicked().connect(self.CancelClicked)
+
+    def Okclicked(self):
+        print ("Ok clicked")
+
+    def Cancelclicked(self):
+        print ("Cancel clicked")
+
 
 class myMainWindow(QMainWindow, Ui_MainWindow):
     askusersig = pyqtSignal(str, str, str, str, str, str) #connected to askUserOUT
@@ -133,6 +151,9 @@ class myMainWindow(QMainWindow, Ui_MainWindow):
     prevstats = ''
     model = None
     sourcemodel = None
+    menu = None
+    #index = None
+    out_rules_num = 0
 
     def __init__(self):
         QMainWindow.__init__(self)
@@ -142,6 +163,7 @@ class myMainWindow(QMainWindow, Ui_MainWindow):
         self.tableView.setShowGrid(False)
         self.actionDisplay.triggered.connect(self.displayconnections)
         self.actionList_Rules.triggered.connect(self.listrules)
+        self.actionAdd_Rules.triggered.connect(self.addrules)
         self.menuRules.aboutToShow.connect(self.rulesMenuTriggered)
         self.menuRules.actions()[0].triggered.connect(self.deleteMenuTriggered)
         self.actionShow_active_only.triggered.connect(self.showActiveOnly)
@@ -153,20 +175,85 @@ class myMainWindow(QMainWindow, Ui_MainWindow):
         self.refreshconnectionssig.connect(self.refreshconnections)
         msgQueue.put('LIST')        
 
+
+    def addrules(self):
+        dialog = addruledialog
+        dialog.show()
+
+    def contextMenuEvent(self, event):
+        current_layout_lock.acquire()
+        if(self.sourcemodel.current_layout == "conn"):
+            current_layout_lock.release()
+            return
+        current_layout_lock.release()
+        #self.index = self.sourcemodel.indexAt(event.pos())
+        self.menu = QMenu(self)
+        delete_ruleAction = QAction("Delete", self)
+        delete_ruleAction.triggered.connect(self.deleterule)
+        self.menu.addAction(delete_ruleAction)
+        self.menu.popup(QtGui.QCursor.pos())
+
+    def deleterule(self):
+        #index = self.tableView.selectedIndexes()
+        #print(index[0].row())
+        row_num = (self.tableView.selectedIndexes())[0].row()
+        if(row_num < self.out_rules_num):
+            #print ("-d OUT " + str(row_num + 1))
+            cmd_del = "-d OUT " + str(row_num + 1)
+        else:
+            #print ("-d IN " + str(row_num - self.out_rules_num + 1))
+            cmd_del = "-d IN " + str(row_num - self.out_rules_num + 1)
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.connect(('127.0.0.1', 9999))
+        sock.send(cmd_del)
+        result = sock.recv(1024)
+        print(result)
+        sock.close()
+
+
+
     def listrules(self):
         self.sourcemodel.layout_change_to_rule_sig.emit()
         self.refreshrules()
 
     def refreshrules(self):
-        self.sourcemodel.layout_change_to_rule_sig.emit()
+        #self.sourcemodel.layout_change_to_rule_sig.emit()
         current_layout_lock.acquire()
         if(self.sourcemodel.current_layout != "rule"):
             print ("refreshrules error")
             current_layout_lock.release()
             return
-        sock = socket.socket(socket.AF_INET, socket_SOCK_STREAM)
-        sock.connect('127.0.0.1', 9999)
-        
+        self.sourcemodel.layoutAboutToBeChanged.emit()
+        self.sourcemodel.removeRows(0, self.sourcemodel.rowCount())
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.connect(('127.0.0.1', 9999))
+        sock.send("--list")
+        ruleslist = ''
+        while(True):
+            data = sock.recv(1024)
+            if not data:
+                break
+            ruleslist = ruleslist + data
+        sock.close()
+        #print (ruleslist)
+        if ruleslist:
+            self.out_rules_num = 0
+            for ruleline in ruleslist[0:-1].split('\n'):
+                #print ( 'line: ' + line)
+                items = ruleline.split()
+                print (items)
+                if(items[0] == 'direction:OUT'):
+                    self.out_rules_num += 1
+                direction = QStandardItem((items[0].split(':'))[1])
+                lport = QStandardItem((items[1].split(':'))[1])
+                raddr = QStandardItem((items[3].split(':'))[1])
+                rport = QStandardItem((items[5].split(':'))[1])
+                proto = QStandardItem((items[6].split(':'))[1])
+                target = QStandardItem((items[7].split(':'))[1])
+                #print (direction + ':' + lport + ':' + raddr + ':' + rport + ':' + proto + ':' + target) 
+                self.sourcemodel.appendRow( (direction, lport, raddr, rport, proto, target) )
+
+        self.sourcemodel.layoutChanged.emit()
         current_layout_lock.release()
 
     def displayconnections(self):
@@ -177,7 +264,7 @@ class myMainWindow(QMainWindow, Ui_MainWindow):
             self.sourcemode.layout_change_to_conn_sig.emit()
             self.refreshconnections()
             '''
-        self.sourcemode.layout_change_to_conn_sig.emit()
+        self.sourcemodel.layout_change_to_conn_sig.emit()
         self.refreshconnections()
         
 
@@ -642,6 +729,8 @@ if __name__ == "__main__":
     thread.daemon = True
     thread.start()
     '''
+    addruledialog = myDialog()
+
     thread = threading.Thread(target= testfunc)
     thread.daemon = True
     thread.start()
