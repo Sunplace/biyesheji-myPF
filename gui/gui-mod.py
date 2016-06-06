@@ -131,15 +131,108 @@ class myDialog(QDialog, Ui_Dialog):
         QDialog.__init__(self)
         self.setupUi(self)
         self.setWindowTitle("PF addrule Dialog")
-        self.buttonBox.accepted.connect(self.Okclicked)
-        self.buttonBox.rejected.connect(self.Cancelclicked)
+
+        #self.buttonBox.accepted.connect(self.Okclicked)
+        #self.buttonBox.rejected.connect(self.Cancelclicked)
         #self.buttonBox.button(QtGui.QDialogButtonBox.Reset).clicked().connect(self.foo)
         #self.buttonBox.button(QtGui.QDialogButtonBox.Cancel).clicked().connect(self.CancelClicked)
+        self.pushButton_confirm.clicked.connect(self.confirm)
+        self.pushButton_cancel.clicked.connect(self.close)
 
-    def Okclicked(self):
-        print ("Ok clicked")
+    def confirm(self):
+        print ("confirm clicked")
+        self.plainTextEdit.clear()
+        if(self.direction_out.isChecked()):
+            direction = "OUT"
+        else:
+            direction = "IN"
+        lport = str(self.lport.text())
+        if(lport.isdigit()):
+            if(int(lport) > 0 and int(lport) < 65536):
+                pass
+            else:
+                self.plainTextEdit.appendPlainText("local port must bigger than 0, and less than 65536,[1:65535], or '-' to represent all port")
+                self.lport.clear()
+                return
+        else:
+            if(lport == '-'):
+                pass
+            else:
+                self.plainTextEdit.appendPlainText("local port must be a number,[1:65535], or '-' to represent all port")
+                self.lport.clear()
+                return
+        raddr = str(self.raddr.text())
+        if(raddr == '-'):
+            pass
+        else:
+            tmp = raddr.split('.')
+            if(len(tmp) != 4):
+                self.plainTextEdit.appendPlainText("remote address must be like that: xxx.xxx.xxx.xxx, xxx is a digit between 1-254")
+                self.raddr.clear()
+                return
+            else:
+                for item in tmp:
+                    if(not item.isdigit()):
+                        self.plainTextEdit.appendPlainText("remote address must be like that: xxx.xxx.xxx.xxx, xxx is a digit between 1-254")
+                        self.raddr.clear()
+                        return
+                    else:
+                        if(int(item) < 1 or int(item) > 254):
+                            self.plainTextEdit.appendPlainText("remote address must be like that: xxx.xxx.xxx.xxx, xxx is a digit between 1-254")
+                            self.raddr.clear()
+                            return
+        rport = str(self.rport.text())
+        if(rport.isdigit()):
+            if(int(rport) > 0 and int(rport) < 65536):
+                pass
+            else:
+                self.plainTextEdit.appendPlainText("remote port must bigger than 0, and less than 65536,[1:65535], or '-' to represent all port")
+                self.rport.clear()
+                return
+        else:
+            if(rport == '-'):
+                pass
+            else:
+                self.plainTextEdit.appendPlainText("remote port must be a number,[1:65535], or '-' to represent all port")
+                self.rport.clear()
+                return
+        if(self.protocol_tcp.isChecked()):
+            proto = "TCP"
+        else:
+            proto = "UDP"
+        if(self.target_drop.isChecked()):
+            target = "DROP"
+        else:
+            target = "ACCEPT"
+        #proto = self.protocol.text()
+        #target = self.target.text()
+        #print (direction)
+        print (direction + ':' + lport + ':' + raddr + ':' + rport + ':' + proto + ':' + target) 
+        self.plainTextEdit.appendPlainText("adding rule.... \n" +
+                "direction: " + direction + "\n" +
+                "local port: " + lport + "\n" +
+                "remote address: " + raddr + "\n" +
+                "remote port: " + rport + "\n" +
+                "protocol: " + proto + "\n" +
+                "target: " + target )
+        
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.connect( ('127.0.0.1', 9999))
+        sock.send("-a " + direction + " " + lport + " " + raddr + " " + rport + " " + proto + " " + target)
+        data = sock.recv(1024)
+        print (data)
+        self.plainTextEdit.appendPlainText("result:" + data)
+        self.lport.clear()
+        self.raddr.clear()
+        self.rport.clear()
+        self.direction_out.setChecked(True)
+        self.protocol_tcp.setChecked(True)
+        self.target_drop.setChecked(True)
+        window.refreshrulessig.emit()
 
-    def Cancelclicked(self):
+
+
+    def cancel(self):
         print ("Cancel clicked")
 
 
@@ -148,6 +241,7 @@ class myMainWindow(QMainWindow, Ui_MainWindow):
     refreshmodelsig = pyqtSignal(str)
     update_bytestatssig = pyqtSignal(str)
     refreshconnectionssig = pyqtSignal()
+    refreshrulessig = pyqtSignal()
     prevstats = ''
     model = None
     sourcemodel = None
@@ -173,6 +267,7 @@ class myMainWindow(QMainWindow, Ui_MainWindow):
         self.update_bytestatssig.connect(self.update_bytestats)
         self.refreshmodelsig.connect(self.refreshmodel)
         self.refreshconnectionssig.connect(self.refreshconnections)
+        self.refreshrulessig.connect(self.refreshrules)
         msgQueue.put('LIST')        
 
 
@@ -209,6 +304,7 @@ class myMainWindow(QMainWindow, Ui_MainWindow):
         result = sock.recv(1024)
         print(result)
         sock.close()
+        self.refreshrules()
 
 
 

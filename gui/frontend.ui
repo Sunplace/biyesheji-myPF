@@ -99,10 +99,7 @@
     <property name="title">
      <string>&amp;Rules</string>
     </property>
-    <addaction name="actionDelete_selected"/>
     <addaction name="separator"/>
-    <addaction name="actionShow_active_only"/>
-    <addaction name="actionShow_all"/>
     <addaction name="separator"/>
     <addaction name="actionList_Rules"/>
     <addaction name="actionAdd_Rules"/>
@@ -240,17 +237,17 @@
   </action>
   <action name="actionList_Rules">
    <property name="text">
-    <string>List Rules</string>
+    <string>&amp;List Rules</string>
    </property>
   </action>
   <action name="actionAdd_Rules">
    <property name="text">
-    <string>Add Rules</string>
+    <string>Add &amp;Rules</string>
    </property>
   </action>
   <action name="actionDisplay">
    <property name="text">
-    <string>Display</string>
+    <string>&amp;Display</string>
    </property>
   </action>
  </widget>
