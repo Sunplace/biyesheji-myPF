@@ -20,6 +20,8 @@ int main(int argc,  char *argv[]){
     bool isshowhelp = false;
     bool isdaemon = false;
     bool islist = false;
+    bool isdisconnect = false;
+    bool isreconnect = false;
 
     char sec_parse[MAX_LINE_LEN] = {0};       //require the second parse
     
@@ -30,6 +32,8 @@ int main(int argc,  char *argv[]){
         { "-d",         (char *)sec_parse,      "-d\t\t\tdelet rule from the pf",         2,     sizeof(sec_parse),      STRING},
         { "-D",         (char *)&isdaemon,      "-D\t\t\trun the pf",                     2,      sizeof(isdaemon),       _NULL_},
         { "--list",     (char *)&islist,        "--list\t\t\tlist the exsit rules",         6,  sizeof(islist),         _NULL_},
+        { "--disconnect", (char *)&disconnect,  "--disconnet\t\tdisconnect the Internet", 12,   sizeof(isdisconnect),   _NULL_},
+        { "--reconnect", (char *)&reconnect,  "--reconnet\t\treconnect the Internet", 11,   sizeof(isreconnect),   _NULL_},
         {0}
     };
 
