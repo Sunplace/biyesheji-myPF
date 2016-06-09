@@ -103,6 +103,8 @@ static void clean_connection(void);
 
 static void iptables_local(bool isenable);
 
+void send_to_front(char * msg);
+
 #ifdef __LITTLE_ENDIAN
 #define IPQUAD(addr) \
 ((unsigned char *)&addr)[0], \

@@ -22,6 +22,7 @@ msgQueue = Queue.Queue()
 #global vars
 modellock = Lock()
 current_layout_lock = Lock()
+msg_lock = Lock()
 
 
 class Ui_MainWindow(object):
@@ -133,6 +134,7 @@ class myDialogIn(queryDialog, Ui_Dialog):
 class msgDialog(QDialog, Ui_MsgDialog):
     #some var
     msgsig = pyqtSignal(str)
+    displaymsg = True
 
     def __init__(self):
         QDialog.__init__(self)
@@ -142,7 +144,27 @@ class msgDialog(QDialog, Ui_MsgDialog):
 
     @pyqtSlot(str)
     def message(self, msg):
+        msg_lock.acquire()
+        if self.isVisible():
+            if self.displaymsg:
+                print ("msg event")
+                self.plainTextEdit.appendPlainText(msg)
+        else:
+            print ("Invisible")
+        msg_lock.release()
 
+    def closeEvent(self, event):
+        print ("close event")
+        event.accept()
+
+    def keyPressEvent(self, event):
+        key = event.key()
+        print (key)
+        if key == QtCore.Qt.Key_Q:
+            print ("key q")
+            msg_lock.acquire()
+            self.displaymsg = (not self.displaymsg)
+            msg_lock.release()
 
 
 class myDialog(QDialog, Ui_Dialog):
@@ -263,6 +285,10 @@ class myDialog(QDialog, Ui_Dialog):
     def cancel(self):
         print ("Cancel clicked")
 
+    def closeEvent(self, event):
+        print ("close event")
+        event.accept()
+
 
 class myMainWindow(QMainWindow, Ui_MainWindow):
     askusersig = pyqtSignal(str, str, str, str, str, str) #connected to askUserOUT
@@ -292,6 +318,7 @@ class myMainWindow(QMainWindow, Ui_MainWindow):
         self.actionAdd_Rules.triggered.connect(self.addrules)
         self.actionDisconnect.triggered.connect(self.disconnection)
         self.actionReconnect.triggered.connect(self.reconnection)
+        self.actionMessage.triggered.connect(self.message)
         #self.menuRules.aboutToShow.connect(self.rulesMenuTriggered)
         #self.menuRules.actions()[0].triggered.connect(self.deleteMenuTriggered)
         #self.actionShow_active_only.triggered.connect(self.showActiveOnly)
@@ -303,6 +330,10 @@ class myMainWindow(QMainWindow, Ui_MainWindow):
         self.refreshconnectionssig.connect(self.refreshconnections)
         self.refreshrulessig.connect(self.refreshrules)
         #msgQueue.put('LIST')        
+
+    def message(self):
+        dialog = msgdialog
+        dialog.show()
 
     def disconnection(self):
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -725,6 +756,17 @@ def testfunc():
         current_layout_lock.release()
         time.sleep(3)
 
+def msgserv():
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.bind( ('127.0.0.1', 9998) )
+    while (True):
+        data, addr = sock.recvfrom(1024)
+        if not data:
+            break
+        #print (data)
+        #if msgdialog.isVisble()
+        msgdialog.msgsig.emit(data)
+
 
 
 class myModel(QStandardItemModel):
@@ -877,8 +919,13 @@ if __name__ == "__main__":
     thread.start()
     '''
     addruledialog = myDialog()
+    msgdialog = msgDialog()
 
-    thread = threading.Thread(target= testfunc)
+    thread = threading.Thread( target = testfunc)
+    thread.daemon = True
+    thread.start()
+
+    thread = threading.Thread( target = msgserv)
     thread.daemon = True
     thread.start()
 

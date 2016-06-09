@@ -441,6 +441,7 @@ static int cb (struct nfq_q_handle * qh, struct nfgenmsg * nfmsg , struct nfq_da
     (void)nfmsg;
 
 
+    char buff[MAX_LINE_LEN];
     struct nfqnl_msg_packet_hdr * ph;
     struct iphdr * ip ;
     int ipdata_len;
@@ -482,6 +483,10 @@ static int cb (struct nfq_q_handle * qh, struct nfgenmsg * nfmsg , struct nfq_da
         printf("len %d iphdr %d %u.%u.%u.%u:%u %s ",ipdata_len,(ip->ihl)<<2,IPQUAD(laddr),ntohs(lport), ((direc == OUT) ? "->" : "<-"));
         printf("%u.%u.%u.%u:%u  proto:%s",IPQUAD(raddr),ntohs(rport),getprotobynumber(proto)->p_name);
         err_msg("\n");
+        sprintf(buff, "%u.%u.%u.%u:%u %s %u.%u.%u.%u:%u  protocol:%s  target:%s",
+                IPQUAD(laddr), ntohs(lport), ((direc == OUT) ? "->" : "<-"),
+                IPQUAD(raddr), ntohs(rport), getprotobynumber(proto)->p_name, "ACCEPT");
+        send_to_front(buff);
 
 
         //connection accept
@@ -497,6 +502,10 @@ static int cb (struct nfq_q_handle * qh, struct nfgenmsg * nfmsg , struct nfq_da
         printf("len %d iphdr %d %u.%u.%u.%u:%u %s ",ipdata_len,(ip->ihl)<<2,IPQUAD(laddr),ntohs(lport), ((direc == OUT) ? "->" : "<-"));
         printf("%u.%u.%u.%u:%u  proto:%s",IPQUAD(raddr),ntohs(rport),getprotobynumber(proto)->p_name);
         err_msg("\n");
+        sprintf(buff, "%u.%u.%u.%u:%u %s %u.%u.%u.%u:%u  protocol:%s  target:%s",
+                IPQUAD(laddr), ntohs(lport), ((direc == OUT) ? "->" : "<-"),
+                IPQUAD(raddr), ntohs(rport), getprotobynumber(proto)->p_name, "DROP");
+        send_to_front(buff);
 
 
         //connection droped. 
@@ -901,5 +910,20 @@ static void iptables_local(bool isenable){
             err_sys("system error, iptable local");
         fputs("iptables local\n", stdout);
     }
+    return;
+}
+
+void send_to_front(char * msg){
+    struct sockaddr_in saddr;
+    bzero(&saddr,sizeof(saddr));
+    saddr.sin_family = AF_INET;
+    inet_pton(AF_INET, "127.0.0.1", &saddr.sin_addr);
+    saddr.sin_port = htons(9998);
+    int fd;
+    if((fd = socket(AF_INET, SOCK_DGRAM, 0)) < 0)
+        err_sys("socket error");
+    if(sendto(fd, msg, strlen(msg), 0, (struct sockaddr *)&saddr, sizeof(struct sockaddr_in)) < 0)
+        err_sys("sendto error");
+    close(fd);
     return;
 }

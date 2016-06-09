@@ -94,6 +94,7 @@
     </property>
     <addaction name="separator"/>
     <addaction name="actionExit"/>
+    <addaction name="actionMessage"/>
    </widget>
    <widget class="QMenu" name="menuRules">
     <property name="title">
@@ -260,6 +261,11 @@
   <action name="actionReconnect">
    <property name="text">
     <string>&amp;重新连接</string>
+   </property>
+  </action>
+  <action name="actionMessage">
+   <property name="text">
+    <string>解析过程</string>
    </property>
   </action>
  </widget>
