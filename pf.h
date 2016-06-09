@@ -97,6 +97,12 @@ void * thread_nfq_out(void * arg);
 
 void * thread_nfq_in(void * arg);
 
+void change_connection_status(bool Internet);
+
+static void clean_connection(void);
+
+static void iptables_local(bool isenable);
+
 #ifdef __LITTLE_ENDIAN
 #define IPQUAD(addr) \
 ((unsigned char *)&addr)[0], \

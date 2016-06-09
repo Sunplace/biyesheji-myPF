@@ -23,7 +23,7 @@
     </rect>
    </property>
    <property name="text">
-    <string>direction</string>
+    <string>方向</string>
    </property>
   </widget>
   <widget class="QLabel" name="label_lport">
@@ -36,7 +36,7 @@
     </rect>
    </property>
    <property name="text">
-    <string>local port</string>
+    <string>本地端口</string>
    </property>
   </widget>
   <widget class="QLabel" name="label_raddr">
@@ -49,7 +49,7 @@
     </rect>
    </property>
    <property name="text">
-    <string>remote address</string>
+    <string>远程地址</string>
    </property>
   </widget>
   <widget class="QLabel" name="label_raddr_2">
@@ -62,7 +62,7 @@
     </rect>
    </property>
    <property name="text">
-    <string>remote port</string>
+    <string>远程端口</string>
    </property>
   </widget>
   <widget class="QLabel" name="label_raddr_3">
@@ -75,7 +75,7 @@
     </rect>
    </property>
    <property name="text">
-    <string>protocol</string>
+    <string>协议</string>
    </property>
   </widget>
   <widget class="QLabel" name="label_raddr_4">
@@ -88,7 +88,7 @@
     </rect>
    </property>
    <property name="text">
-    <string>target</string>
+    <string>去向</string>
    </property>
   </widget>
   <widget class="QLineEdit" name="lport">
@@ -131,7 +131,7 @@
     </rect>
    </property>
    <property name="text">
-    <string>confirm</string>
+    <string>确认</string>
    </property>
   </widget>
   <widget class="QPushButton" name="pushButton_cancel">
@@ -144,7 +144,7 @@
     </rect>
    </property>
    <property name="text">
-    <string>cancel</string>
+    <string>取消</string>
    </property>
   </widget>
   <widget class="QWidget" name="widget_direction" native="true">
@@ -166,7 +166,7 @@
      </rect>
     </property>
     <property name="text">
-     <string>IN</string>
+     <string>进入连接</string>
     </property>
    </widget>
    <widget class="QRadioButton" name="direction_out">
@@ -179,15 +179,12 @@
      </rect>
     </property>
     <property name="text">
-     <string>OUT</string>
+     <string>外出连接</string>
     </property>
     <property name="checked">
      <bool>true</bool>
     </property>
    </widget>
-   <zorder>direction_in</zorder>
-   <zorder>direction_in</zorder>
-   <zorder>direction_out</zorder>
   </widget>
   <widget class="QWidget" name="widget_protocol" native="true">
    <property name="geometry">
@@ -247,7 +244,7 @@
      </rect>
     </property>
     <property name="text">
-     <string>drop</string>
+     <string>&amp;拒绝</string>
     </property>
     <property name="checked">
      <bool>true</bool>
@@ -263,7 +260,7 @@
      </rect>
     </property>
     <property name="text">
-     <string>accept</string>
+     <string>&amp;接受</string>
     </property>
    </widget>
   </widget>

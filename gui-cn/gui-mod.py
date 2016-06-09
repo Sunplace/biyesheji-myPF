@@ -33,6 +33,9 @@ class Ui_Dialog(object):
     def setupUi(self, DialogOut):
         uic.loadUi(os.path.join(data_dir, 'addrule.ui'), self)
 
+class Ui_MsgDialog(object):
+    def setupUi(self, DialogOut):
+        uic.loadUi(os.path.join(data_dir, 'message.ui'), self)
 
 class queryDialog(QDialog):
     dns_lookup_id = 0
@@ -126,13 +129,29 @@ class myDialogIn(queryDialog, Ui_Dialog):
         Ui_Dialog.__init__(self)
         queryDialog.__init__(self, 'IN')
 
+
+class msgDialog(QDialog, Ui_MsgDialog):
+    #some var
+    msgsig = pyqtSignal(str)
+
+    def __init__(self):
+        QDialog.__init__(self)
+        self.setupUi(self)
+        self.setWindowTitle(u"解析过程")
+        self.msgsig.connect(self.message)
+
+    @pyqtSlot(str)
+    def message(self, msg):
+
+
+
 class myDialog(QDialog, Ui_Dialog):
     #
 
     def __init__(self):
         QDialog.__init__(self)
         self.setupUi(self)
-        self.setWindowTitle("PF addrule Dialog")
+        self.setWindowTitle(u"添加规则")
 
         #self.buttonBox.accepted.connect(self.Okclicked)
         #self.buttonBox.rejected.connect(self.Cancelclicked)
@@ -153,14 +172,16 @@ class myDialog(QDialog, Ui_Dialog):
             if(int(lport) > 0 and int(lport) < 65536):
                 pass
             else:
-                self.plainTextEdit.appendPlainText("local port must bigger than 0, and less than 65536,[1:65535], or '-' to represent all port")
+                #self.plainTextEdit.appendPlainText("local port must bigger than 0, and less than 65536,[1:65535], or '-' to represent all port")
+                self.plainTextEdit.appendPlainText(u"本地端口必须介于1与65535之间，-代表所有端口");
                 self.lport.clear()
                 return
         else:
             if(lport == '-'):
                 pass
             else:
-                self.plainTextEdit.appendPlainText("local port must be a number,[1:65535], or '-' to represent all port")
+                #self.plainTextEdit.appendPlainText("local port must be a number,[1:65535], or '-' to represent all port")
+                self.plainTextEdit.appendPlainText(u"本地端口必须介于1与65535之间，-代表所有端口");
                 self.lport.clear()
                 return
         raddr = str(self.raddr.text())
@@ -169,18 +190,21 @@ class myDialog(QDialog, Ui_Dialog):
         else:
             tmp = raddr.split('.')
             if(len(tmp) != 4):
-                self.plainTextEdit.appendPlainText("remote address must be like that: xxx.xxx.xxx.xxx, xxx is a digit between 1-254")
+                #self.plainTextEdit.appendPlainText("remote address must be like that: xxx.xxx.xxx.xxx, xxx is a digit between 1-254")
+                self.plainTextEdit.appendPlainText(u"远程地址必须如xxx.xxx.xxx.xxx或者xxx.xxx.xxx.xxx/xx,-代表所有地址")
                 self.raddr.clear()
                 return
             else:
                 for item in tmp:
                     if(not item.isdigit()):
-                        self.plainTextEdit.appendPlainText("remote address must be like that: xxx.xxx.xxx.xxx, xxx is a digit between 1-254")
+                        #self.plainTextEdit.appendPlainText("remote address must be like that: xxx.xxx.xxx.xxx, xxx is a digit between 1-254")
+                        self.plainTextEdit.appendPlainText(u"远程地址必须如xxx.xxx.xxx.xxx或者xxx.xxx.xxx.xxx/xx,-代表所有地址")
                         self.raddr.clear()
                         return
                     else:
                         if(int(item) < 1 or int(item) > 254):
-                            self.plainTextEdit.appendPlainText("remote address must be like that: xxx.xxx.xxx.xxx, xxx is a digit between 1-254")
+                            #self.plainTextEdit.appendPlainText("remote address must be like that: xxx.xxx.xxx.xxx, xxx is a digit between 1-254")
+                            self.plainTextEdit.appendPlainText(u"远程地址必须如xxx.xxx.xxx.xxx或者xxx.xxx.xxx.xxx/xx,-代表所有地址")
                             self.raddr.clear()
                             return
         rport = str(self.rport.text())
@@ -188,14 +212,16 @@ class myDialog(QDialog, Ui_Dialog):
             if(int(rport) > 0 and int(rport) < 65536):
                 pass
             else:
-                self.plainTextEdit.appendPlainText("remote port must bigger than 0, and less than 65536,[1:65535], or '-' to represent all port")
+                #self.plainTextEdit.appendPlainText("remote port must bigger than 0, and less than 65536,[1:65535], or '-' to represent all port")
+                self.plainTextEdit.appendPlainText(u"远程端口必须介于1与65535之间，-代表所有端口")
                 self.rport.clear()
                 return
         else:
             if(rport == '-'):
                 pass
             else:
-                self.plainTextEdit.appendPlainText("remote port must be a number,[1:65535], or '-' to represent all port")
+                #self.plainTextEdit.appendPlainText("remote port must be a number,[1:65535], or '-' to represent all port")
+                self.plainTextEdit.appendPlainText(u"远程端口必须介于1与65535之间，-代表所有端口")
                 self.rport.clear()
                 return
         if(self.protocol_tcp.isChecked()):
@@ -210,20 +236,20 @@ class myDialog(QDialog, Ui_Dialog):
         #target = self.target.text()
         #print (direction)
         print (direction + ':' + lport + ':' + raddr + ':' + rport + ':' + proto + ':' + target) 
-        self.plainTextEdit.appendPlainText("adding rule.... \n" +
-                "direction: " + direction + "\n" +
-                "local port: " + lport + "\n" +
-                "remote address: " + raddr + "\n" +
-                "remote port: " + rport + "\n" +
-                "protocol: " + proto + "\n" +
-                "target: " + target )
+        self.plainTextEdit.appendPlainText(u"添加规则.... \n" +
+                u"方向: " + direction + "\n" +
+                u"本地端口: " + lport + "\n" +
+                u"远程地址: " + raddr + "\n" +
+                u"远程端口: " + rport + "\n" +
+                u"协议: " + proto + "\n" +
+                u"去向: " + target )
         
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.connect( ('127.0.0.1', 9999))
         sock.send("-a " + direction + " " + lport + " " + raddr + " " + rport + " " + proto + " " + target)
         data = sock.recv(1024)
         print (data)
-        self.plainTextEdit.appendPlainText("result:" + data)
+        self.plainTextEdit.appendPlainText(u"成功?:" + data)
         self.lport.clear()
         self.raddr.clear()
         self.rport.clear()
@@ -264,6 +290,8 @@ class myMainWindow(QMainWindow, Ui_MainWindow):
         self.actionDisplay.triggered.connect(self.displayconnections)
         self.actionList_Rules.triggered.connect(self.listrules)
         self.actionAdd_Rules.triggered.connect(self.addrules)
+        self.actionDisconnect.triggered.connect(self.disconnection)
+        self.actionReconnect.triggered.connect(self.reconnection)
         #self.menuRules.aboutToShow.connect(self.rulesMenuTriggered)
         #self.menuRules.actions()[0].triggered.connect(self.deleteMenuTriggered)
         #self.actionShow_active_only.triggered.connect(self.showActiveOnly)
@@ -276,6 +304,21 @@ class myMainWindow(QMainWindow, Ui_MainWindow):
         self.refreshrulessig.connect(self.refreshrules)
         #msgQueue.put('LIST')        
 
+    def disconnection(self):
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.connect( ('127.0.0.1', 9999) )
+        sock.send("--disconnect")
+        data = sock.recv(1024)
+        print data
+        sock.close()
+
+    def reconnection(self):
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.connect( ('127.0.0.1', 9999) )
+        sock.send("--reconnect")
+        data = sock.recv(1024)
+        print data
+        sock.close()
 
     def addrules(self):
         dialog = addruledialog
@@ -289,7 +332,7 @@ class myMainWindow(QMainWindow, Ui_MainWindow):
         current_layout_lock.release()
         #self.index = self.sourcemodel.indexAt(event.pos())
         self.menu = QMenu(self)
-        delete_ruleAction = QAction("删除", self)
+        delete_ruleAction = QAction(u"删除", self)
         delete_ruleAction.triggered.connect(self.deleterule)
         self.menu.addAction(delete_ruleAction)
         self.menu.popup(QtGui.QCursor.pos())

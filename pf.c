@@ -12,6 +12,7 @@ pthread_mutex_t out_rules_lock = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t in_rules_lock = PTHREAD_MUTEX_INITIALIZER;
 enum DIRECTION out = OUT;
 enum DIRECTION in = IN;
+static bool Internet = true;
 
 
 int main(int argc,  char *argv[]){
@@ -32,8 +33,8 @@ int main(int argc,  char *argv[]){
         { "-d",         (char *)sec_parse,      "-d\t\t\tdelet rule from the pf",         2,     sizeof(sec_parse),      STRING},
         { "-D",         (char *)&isdaemon,      "-D\t\t\trun the pf",                     2,      sizeof(isdaemon),       _NULL_},
         { "--list",     (char *)&islist,        "--list\t\t\tlist the exsit rules",         6,  sizeof(islist),         _NULL_},
-        { "--disconnect", (char *)&disconnect,  "--disconnet\t\tdisconnect the Internet", 12,   sizeof(isdisconnect),   _NULL_},
-        { "--reconnect", (char *)&reconnect,  "--reconnet\t\treconnect the Internet", 11,   sizeof(isreconnect),   _NULL_},
+        { "--disconnect", (char *)&isdisconnect,  "--disconnet\t\tdisconnect the Internet", 12,   sizeof(isdisconnect),   _NULL_},
+        { "--reconnect", (char *)&isreconnect,  "--reconnet\t\treconnect the Internet", 11,   sizeof(isreconnect),   _NULL_},
         {0}
     };
 
@@ -59,6 +60,7 @@ int main(int argc,  char *argv[]){
             err_quit("pf is running.\n");
         }
         else{   */
+            iptables_local(true);           //true : enable the local connection
             openlog("pf log", LOG_CONS | LOG_PID, 0);           //init log service
             rules_file_load();   //load the rules file
             err_msg("\n");
@@ -79,6 +81,10 @@ int main(int argc,  char *argv[]){
         /*
          * to do
          */
+        if(isdisconnect)
+            strncpy(sec_parse, "--disconnect", 13);
+        if(isreconnect)
+            strncpy(sec_parse, "--reconnect", 12);
         if(islist)
             strncpy(sec_parse, "--list", 7);
         err_msg("%s", sec_parse);
@@ -90,6 +96,7 @@ int main(int argc,  char *argv[]){
     //handle rule
     return 1;
 }
+
 
 void send_cmd_to_serv(char * cmd){
     int sockfd;
@@ -178,24 +185,26 @@ void init_iptables(void){
      * to do
      */
     //do nothing
-    return;
+    //return;
     int ret_out = system("iptables -A OUTPUT -m conntrack --ctstate NEW -j NFQUEUE --queue-num 11220");
     int ret_in = system("iptables -A INPUT -m conntrack --ctstate NEW -j NFQUEUE --queue-num 11221");
     if(ret_out == -1 || ret_in == -1)
         err_sys("init_iptables");
+    err_msg("init_iptables");
     return;
 }
 
-void end_pf_iptables(void){
+void end_iptables(void){
     /*
      * to do
      */
     //do nothing
-    return;
+    //return;
     int ret_out = system("iptables -D OUTPUT -m conntrack --ctstate NEW -j NFQUEUE --queue-num 11220");
     int ret_in = system("iptables -D INPUT -m conntrack --ctstate NEW -j NFQUEUE --queue-num 11221");
     if(ret_out == -1 || ret_in == -1)
         err_sys("end_iptables error");
+    err_msg("end_iptables");
     return;
 }
     
@@ -642,6 +651,18 @@ void do_it (int connfd){
         rules_list(connfd);
         err_msg("rules list");
     }
+    else if(strncmp(buff, "--disconnect", 12) == 0){              //disconnect Internet
+        err_msg("disconnection");
+        change_connection_status(false);
+        if(send(connfd, "disconnected", 11, 0) < 0)
+            err_sys("send error");
+    }
+    else if(strncmp(buff, "--reconnect", 11) == 0){              //reconnect Internet
+        err_msg("reconnection");
+        change_connection_status(true);
+        if(send(connfd, "reconnected", 11, 0) < 0)
+            err_sys("send error");
+    }
     else
         if(send(connfd, "unknow command", 14, 0) < 0)       //unknow
             err_sys("send error");
@@ -650,6 +671,40 @@ void do_it (int connfd){
     
 
 
+}
+
+
+void change_connection_status(bool status){
+    /*
+     * to do
+     */
+    if(Internet){                           //already connected to internet
+        fputs("connected the internet\n",stdout);
+        if(status)
+            fputs("do nothing\n", stdout);
+        else{
+            int ret1 = system("iptables -I INPUT 2 -m conntrack --ctstate NEW -j DROP");
+            int ret2 = system("iptables -I OUTPUT 2 -m conntrack --ctstate NEW -j DROP");
+            if(ret1 == -1 || ret2 == -1)
+                err_sys("system error, disconnection failed");
+            fputs("diconnected the internet\n", stdout);
+            Internet = false;
+        }
+    }
+    else{                                   //now not connected to internet
+        fputs("not connected the internet\n", stdout);
+        if(status){
+            int ret1 = system("iptables -D INPUT -m conntrack --ctstate NEW -j DROP");
+            int ret2 = system("iptables -D OUTPUT -m conntrack --ctstate NEW -j DROP");
+            if(ret1 == -1 || ret2 == -1)
+                err_sys("system error, disconnection failed");
+            fputs("reconnected the internet\n", stdout);
+            Internet = true;
+        }
+        else
+            fputs("do nothing\n", stdout);
+    }
+    return;
 }
 
 int rule_del(int num, enum DIRECTION direc){
@@ -735,6 +790,10 @@ static void sig_init_exit(int signo){
     closelog();             //close the log service
     err_msg("end log service");
 
+    end_iptables();
+    clean_connection();
+    iptables_local(false);
+
     exit(0);
 }
 
@@ -814,4 +873,33 @@ void rules_list(int  fd){
         p = p->next;
     }
     pthread_mutex_unlock(&in_rules_lock);
+}
+
+static void clean_connection(void){
+    if(!Internet){
+        int ret1 = system("iptables -D INPUT -m conntrack --ctstate NEW -j DROP");
+        int ret2 = system("iptables -D OUTPUT -m conntrack --ctstate NEW -j DROP");
+        if(ret1 == -1 || ret2 == -1)
+            err_sys("system error, clean connections failed");
+    }
+        fputs("clean the connections\n", stdout);
+    return;
+}
+
+static void iptables_local(bool isenable){
+    if(isenable){
+        int ret1 = system("iptables -I OUTPUT -m iprange --dst-range 127.0.0.0-127.255.255.255 -j ACCEPT");
+        int ret2 = system("iptables -I INPUT -m iprange --dst-range 127.0.0.0-127.255.255.255 -j ACCEPT");
+        if( ret1 == -1 || ret2 == -1)
+            err_sys("system error, iptable local");
+        fputs("iptables local\n", stdout);
+    }
+    else{
+        int ret1 = system("iptables -D OUTPUT -m iprange --dst-range 127.0.0.0-127.255.255.255 -j ACCEPT");
+        int ret2 = system("iptables -D INPUT -m iprange --dst-range 127.0.0.0-127.255.255.255 -j ACCEPT");
+        if( ret1 == -1 || ret2 == -1)
+            err_sys("system error, iptable local");
+        fputs("iptables local\n", stdout);
+    }
+    return;
 }
