@@ -75,9 +75,9 @@ static int cb (struct nfq_q_handle * qh, struct nfgenmsg * nfmsg , struct nfq_da
 
 void set_rpc_server(void);
 
-void rule_insert(u_int16_t lport, u_int32_t raddr, u_int16_t rport, int proto, enum TARGET targ, enum DIRECTION direc);
+void rule_insert(u_int16_t lport, u_int32_t raddr, u_int32_t mask, u_int16_t rport, int proto, enum TARGET targ, enum DIRECTION direc);
 
-void parse_rules(char line[], u_int16_t * lport_n_p, u_int32_t * raddr_p, u_int16_t * rport_n_p, int * proto_p, enum TARGET * targ_p, enum DIRECTION * direc_p);
+void parse_rules(char line[], u_int16_t * lport_n_p, u_int32_t * raddr_p, u_int32_t * mask_p, u_int16_t * rport_n_p, int * proto_p, enum TARGET * targ_p, enum DIRECTION * direc_p);
 
 enum TARGET execute_verdict(u_int16_t lport, u_int32_t raddr, u_int16_t rport, int proto, enum DIRECTION direc);
 
@@ -104,6 +104,8 @@ static void clean_connection(void);
 static void iptables_local(bool isenable);
 
 void send_to_front(char * msg);
+
+void parse_subnet(char * raddr, u_int32_t * raddr_p, u_int23_t * mask_p);
 
 #ifdef __LITTLE_ENDIAN
 #define IPQUAD(addr) \

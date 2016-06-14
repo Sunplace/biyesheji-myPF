@@ -220,6 +220,7 @@ void rules_file_load(void){
         err_sys("fopen error");
     char line[MAX_LINE_LEN];
     u_int32_t raddr_n;
+    u_int32_t mask_n;
     u_int16_t lport_n;
     u_int16_t rport_n;
     int protocol;
@@ -230,8 +231,8 @@ void rules_file_load(void){
         if(line[0] == '#')      //skip comment
             continue;
         err_msg("%s",line);
-        parse_rules(line, &lport_n, &raddr_n, &rport_n, &protocol, &targ, &direc);
-        rule_insert(lport_n, raddr_n, rport_n, protocol, targ, direc);
+        parse_rules(line, &lport_n, &raddr_n, &mask_n, &rport_n, &protocol, &targ, &direc);
+        rule_insert(lport_n, raddr_n, mask, rport_n, protocol, targ, direc);
     }
     fclose(fp);
 
@@ -243,8 +244,8 @@ void rules_file_load(void){
         if(line[0] == '#')      //skip comment
             continue;
         err_msg("%s",line);
-        parse_rules(line, &lport_n, &raddr_n, &rport_n, &protocol, &targ, &direc);
-        rule_insert(lport_n, raddr_n, rport_n, protocol, targ, direc);
+        parse_rules(line, &lport_n, &raddr_n, &mask_n, &rport_n, &protocol, &targ, &direc);
+        rule_insert(lport_n, raddr_n, mask, rport_n, protocol, targ, direc);
     }
     fclose(fp1);
     
@@ -253,12 +254,13 @@ void rules_file_load(void){
 }
 
 
-void rule_insert(u_int16_t lport, u_int32_t raddr, u_int16_t rport, int proto, enum TARGET targ, enum DIRECTION direc){
+void rule_insert(u_int16_t lport, u_int32_t raddr, u_int32_t mask, u_int16_t rport, int proto, enum TARGET targ, enum DIRECTION direc){
     rules_link p, * head_p;
     if((p = malloc(sizeof(rule_nd))) == NULL)
         err_sys("malloc error");
     p->lport = lport;
     p->raddr = raddr;
+    p->mask = mask;
     p->rport = rport;
     p->proto = proto;
     p->target = targ;
@@ -292,9 +294,9 @@ void rule_insert(u_int16_t lport, u_int32_t raddr, u_int16_t rport, int proto, e
 
 
     //add rule insert log
-    syslog(LOG_USER | LOG_DEBUG, "rule add,direction:%s,local port:%u,remote address:%u.%u.%u.%u,remote port:%u,protocol:%s,target:%s.",
+    syslog(LOG_USER | LOG_DEBUG, "rule add,direction:%s,local port:%u,remote address:%u.%u.%u.%u,mask:%u.%u.%u.%u,remote port:%u,protocol:%s,target:%s.",
             ((direc == OUT) ? "OUT" : "IN"), ntohs(lport),
-            IPQUAD(raddr), ntohs(rport), getprotobynumber(proto)->p_name,
+            IPQUAD(raddr), IPQUAD(mask), ntohs(rport), getprotobynumber(proto)->p_name,
             ((targ == DROP) ? "DROP" : "ACCEPT"));
 
     return;
@@ -303,7 +305,7 @@ void rule_insert(u_int16_t lport, u_int32_t raddr, u_int16_t rport, int proto, e
 
 
 
-void parse_rules(char line[], u_int16_t * lport_n_p, u_int32_t * raddr_p, u_int16_t * rport_n_p, int * proto_p, enum TARGET * targ_p, enum DIRECTION * direc_p){
+void parse_rules(char line[], u_int16_t * lport_n_p, u_int32_t * raddr_p, u_int32_t * mask_p, u_int16_t * rport_n_p, int * proto_p, enum TARGET * targ_p, enum DIRECTION * direc_p){
         char lport[10];         //local port
         char raddr[20];         //remote address
         char rport[10];         //remote port
@@ -319,12 +321,18 @@ void parse_rules(char line[], u_int16_t * lport_n_p, u_int32_t * raddr_p, u_int1
         else
             err_quit("unknow direction:%s", direc);
 
-        if(strncmp(raddr, "-", 1) == 0)
-            *raddr_p = 0;              //all port
+        if(strncmp(raddr, "-", 1) == 0){
+            *raddr_p = 0;              //all address
+            *mask_p = 0;
+        }
         else
+            parse_subnet(raddr, raddr_p, mask_p);           //perhaps the remote address is a subnet
+        /*
             if(inet_pton(AF_INET, raddr, raddr_p) <= 0)
                 err_quit("inet_pton error for %s",raddr);
+                */
         err_msg("remote addrr:%s:%x",raddr,*raddr_p);
+        err_msg("mask:%u.%u.%u.%u", IPQUAD(*mask_p);
         if(strncmp(lport, "-", 1) == 0)
             *lport_n_p = 0;
         else
@@ -543,8 +551,9 @@ enum TARGET execute_verdict(u_int16_t lport, u_int32_t raddr, u_int16_t rport, i
     //critical zone
     err_msg("%s", (direc == OUT) ? "travel out rules link" : "travel in rules link");
     while(p){
-        if(    ( !(p->lport) || (lport == p->lport) )     &&    ( !(p->raddr) || (raddr == p->raddr)  )   && \
+        if(    ( !(p->lport) || (lport == p->lport) )     &&    ( (raddr & (p->mask)) == p->raddr)  && \
                     ( !(p->rport) || (rport == p->rport) )    &&   ( proto == p->proto)    ){
+                //( !(p->raddr) || (raddr == p->raddr)  )   && out date
             //find a rule;
             //pthread_mutex_unlock(&out_rules_lock);
             //go to REDIREC_TARG;
@@ -618,6 +627,7 @@ void do_it (int connfd){
     int n;
     char buff[MAX_LINE_LEN];
     u_int32_t raddr;
+    u_int32_t mask;
     u_int16_t rport;
     u_int16_t lport;
     enum TARGET targ;
@@ -629,8 +639,8 @@ void do_it (int connfd){
     buff[n] = '\0';
     err_msg("%s",buff);
     if(strncmp(buff, "-a", 2) == 0){                    //add rule
-        parse_rules(buff+2, &lport, &raddr, &rport, &proto, &targ, &direc);
-        rule_insert(lport, raddr, rport, proto, targ, direc);
+        parse_rules(buff+2, &lport, &raddr, &mask, &rport, &proto, &targ, &direc);
+        rule_insert(lport, raddr, mask, rport, proto, targ, direc);
         err_msg("rule add:%s", buff+2);
         if(send(connfd, "rule added", 10, 0) < 0)
             err_sys("send error");
@@ -827,7 +837,8 @@ static void clean_rules_link(void){
 
 void rules_list(int  fd){
     rules_link p;
-    char buff[20];
+    char buff_addr[20];
+    char buff_mask[20];
     char tmp[MAX_LINE_LEN];
 
     err_msg("\n");
@@ -842,9 +853,9 @@ void rules_list(int  fd){
         //fprintf(out, "remote port:%d",ntohs(p->rport));
         //fprintf(out, "protocol:%s", getprotobynumber(p->proto)->p_name);
         //fprintf(out, "target:%s", p->target == ACCEPT ? "ACCEPT" : "DROP");
-        sprintf(tmp, "direction:%s\tlocalport:%d\tremote address:%s\tremote port:%d\tprotocol:%s\ttarget:%s\n",
+        sprintf(tmp, "direction:%s\tlocalport:%d\tremote address:%s\tmask:%s\tremote port:%d\tprotocol:%s\ttarget:%s\n",
                 "OUT",
-                ntohs(p->lport), inet_ntop(AF_INET, &(p->raddr), buff, 20),
+                ntohs(p->lport), inet_ntop(AF_INET, &(p->raddr), buff_addr, 20), inet_ntop(AF_INET, &(p->mask), buff_mask, 20),
                 ntohs(p->rport), getprotobynumber(p->proto)->p_name,
                 p->target == ACCEPT ? "ACCEPT" : "DROP" );
 
@@ -869,9 +880,9 @@ void rules_list(int  fd){
         //fprintf(out, "remote port:%d",ntohs(p->rport));
         //fprintf(out, "protocol:%s", getprotobynumber(p->proto)->p_name);
         //fprintf(out, "target:%s", p->target == ACCEPT ? "ACCEPT" : "DROP");
-        sprintf(tmp, "direction:%s\tlocalport:%d\tremote address:%s\tremote port:%d\tprotocol:%s\ttarget:%s\n",
+        sprintf(tmp, "direction:%s\tlocalport:%d\tremote address:%s\tmask:%s\tremote port:%d\tprotocol:%s\ttarget:%s\n",
                 "IN",
-                ntohs(p->lport), inet_ntop(AF_INET, &(p->raddr), buff, 20),
+                ntohs(p->lport), inet_ntop(AF_INET, &(p->raddr), buff_addr, 20), inet_ntop(AF_INET, &(p->raddr), buff_mask, 20),
                 ntohs(p->rport), getprotobynumber(p->proto)->p_name,
                 p->target == ACCEPT ? "ACCEPT" : "DROP" );
 
@@ -927,3 +938,28 @@ void send_to_front(char * msg){
     close(fd);
     return;
 }
+
+
+void parse_subnet(char * raddr, u_int32_t * raddr_p, u_int32_t * mask_p){
+    if( 1 == inet_pton(AF_INET, raddr, raddr_p)){               //remote address isn't a subnet
+        *mask_p = 0xffffffff;       //address mask 255.255.255.255
+    }
+    else{
+        char addr[20];
+        int subnet;
+        char * slash_p = strstr(raddr, "/");
+        if(!slash_p)
+            err_quit("subnet address error:%s\n",raddr);
+        slash_p[0] = ' ';           //divide two parameter
+        if(2 != sscanf(raddr, "%s%d", addr, &subnet))
+            err_quit("subnet error:%s\n", raddr);
+        if(0 == inet_pton(AF_INET, addr, raddr_p))
+            err_quit("subnet error:%s\n", raddr);
+        if(subnet > 0 && subnet <= 24 && (!( ~(0xffffffff << subnet) & (*raddr_p) ))a){
+            //subnet > 0 and subnet <= 24 ,and addr is valid
+            *mask_p = (0xffffffff << subnet);
+        }
+    }
+}
+
+

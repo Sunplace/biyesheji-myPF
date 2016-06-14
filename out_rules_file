@@ -1,5 +1,7 @@
+# personal firewall
+#
 # out rules file
-# direction     local port        remote address          remote port         portocol        target
-OUT             -                   121.42.168.57           22                  TCP             DROP
-OUT             -                   121.42.168.56           2202                UDP             ACCEPT
-OUT             -                   59.73.145.1             23                  TCP             DROP
+#direction   local port   remote address   remote port   portocol   target
+OUT          -            202.199.27.151   53            UDP        DROP
+OUT          -            202.199.27.152   53            UDP        ACCEPT
+OUT          -            202.199.26.12    8080          TCP        DROP
