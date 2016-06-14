@@ -53,6 +53,8 @@ enum DIRECTION {        //connection direction
 typedef struct out_rule_node{
     u_int16_t lport;        //local port
     u_int32_t raddr;    //remote address
+    u_int32_t mask;         //if raddr is a single address, subnet mask 255.255.255.2555
+                            //for example, if raddr is a 192.168.1.0, subnet mask 255.255.255.0
     u_int16_t rport;        //remote port
     int proto;              //protocol
     enum TARGET target;          //packet target
@@ -77,7 +79,7 @@ void set_rpc_server(void);
 
 void rule_insert(u_int16_t lport, u_int32_t raddr, u_int32_t mask, u_int16_t rport, int proto, enum TARGET targ, enum DIRECTION direc);
 
-void parse_rules(char line[], u_int16_t * lport_n_p, u_int32_t * raddr_p, u_int32_t * mask_p, u_int16_t * rport_n_p, int * proto_p, enum TARGET * targ_p, enum DIRECTION * direc_p);
+bool parse_rules(char line[], u_int16_t * lport_n_p, u_int32_t * raddr_p, u_int32_t * mask_p, u_int16_t * rport_n_p, int * proto_p, enum TARGET * targ_p, enum DIRECTION * direc_p);
 
 enum TARGET execute_verdict(u_int16_t lport, u_int32_t raddr, u_int16_t rport, int proto, enum DIRECTION direc);
 
@@ -105,7 +107,9 @@ static void iptables_local(bool isenable);
 
 void send_to_front(char * msg);
 
-void parse_subnet(char * raddr, u_int32_t * raddr_p, u_int23_t * mask_p);
+bool parse_subnet(char * raddr, u_int32_t * raddr_p, u_int32_t * mask_p);
+
+static int subnet(u_int32_t mask);
 
 #ifdef __LITTLE_ENDIAN
 #define IPQUAD(addr) \

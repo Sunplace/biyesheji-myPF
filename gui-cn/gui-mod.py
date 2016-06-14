@@ -209,6 +209,13 @@ class myDialog(QDialog, Ui_Dialog):
         raddr = str(self.raddr.text())
         if(raddr == '-'):
             pass
+        else if(raddr.find('/') != -1):
+            addr,mask = raddr.split('/')
+            if(int(mask) < 1 or int(mask) > 24):
+                self.planTextEdit.appenPlainText(u"远程地址：子网/子网掩码出错");
+                self.addr.clear()
+            else:
+                pass                    #check the subnet and mask in python is difficult,so pass
         else:
             tmp = raddr.split('.')
             if(len(tmp) != 4):
