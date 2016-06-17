@@ -514,6 +514,7 @@ static int cb (struct nfq_q_handle * qh, struct nfgenmsg * nfmsg , struct nfq_da
         rport = (direc == OUT) ? udp->dest : udp->source;
     }
     else{
+        err_msg("not tcp and udp ,packet accepted\n");
         return nfq_set_verdict(qh, id, NF_ACCEPT, 0, NULL);
     }
     if(execute_verdict(lport, raddr, rport, proto, direc) == ACCEPT){
